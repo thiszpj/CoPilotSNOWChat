@@ -41,7 +41,7 @@ const UnifiedChatWithHandoff = () => {
   // Configuration
   const [config, setConfig] = useState({
     backendUrl: 'http://localhost:3001',
-    azureFunctionUrl: 'https://your-app.azurestaticapps.net', // Update this with your Azure Function URL
+    azureFunctionUrl: 'https://wonderful-sky-0661cc20f.3.azurestaticapps.net', // Update this with your Azure Function URL
     serviceNowUrl: 'https://dev205527.service-now.com',
     serviceNowUsername: 'admin',
     serviceNowPassword: '',
