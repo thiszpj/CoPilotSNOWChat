@@ -40,3 +40,7 @@ Thumbs.db
 # Azure related
 # -----------------------------------------------------
 .swa/
+
+# Ignore environment files with secrets
+.env
+backend/.env
