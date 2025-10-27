@@ -1,0 +1,14 @@
+{
+  "name": "servicenow-azure-functions",
+  "version": "1.0.0",
+  "description": "Azure Functions for ServiceNow integration with Table Storage",
+  "main": "index.js",
+  "scripts": {
+    "start": "func start",
+    "test": "echo \"No tests yet\""
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.2.2"
+  },
+  "devDependencies": {}
+}

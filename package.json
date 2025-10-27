@@ -1,0 +1,35 @@
+{
+  "name": "copilot-directline-project",
+  "version": "1.0.0",
+  "description": "Full-stack Copilot Direct Line chat application",
+  "scripts": {
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm start\"",
+    "start": "concurrently \"cd backend && npm start\" \"cd frontend && npm run build && serve -s frontend/build\"",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm start",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm start",
+    "install:backend": "cd backend && npm install",
+    "install:frontend": "cd frontend && npm install",
+    "install:all": "npm run install:backend && npm run install:frontend",
+    "build": "cd frontend && npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "copilot",
+    "directline",
+    "react",
+    "express",
+    "chatbot",
+    "microsoft-bot-framework"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  }
+}

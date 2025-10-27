@@ -1,0 +1,25 @@
+{
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": [
+        "post"
+      ],
+      "route": "negotiate"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    },
+    {
+      "type": "signalRConnectionInfo",
+      "name": "connectionInfo",
+      "hubName": "servicenowchat",
+      "direction": "in"
+    }
+  ]
+}
