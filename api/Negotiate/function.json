@@ -5,20 +5,18 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": [
-        "post"
-      ],
+      "methods": ["post", "get"],
       "route": "negotiate"
     },
     {
       "type": "http",
       "direction": "out",
-      "name": "$return"
+      "name": "res"
     },
     {
       "type": "signalRConnectionInfo",
       "name": "connectionInfo",
-      "hubName": "servicenowchat",
+      "hubName": "copilotchat",
       "direction": "in"
     }
   ]

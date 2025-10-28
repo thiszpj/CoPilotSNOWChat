@@ -1,0 +1,30 @@
+{
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["post"],
+      "route": "servicenow/receive-message"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "res"
+    },
+    {
+      "type": "signalR",
+      "name": "signalRMessages",
+      "hubName": "copilotchat",
+      "direction": "out"
+    },
+    {
+      "type": "table",
+      "name": "messageTable",
+      "tableName": "ServiceNowMessages",
+      "connection": "AzureWebJobsStorage",
+      "direction": "out"
+    }
+  ]
+}

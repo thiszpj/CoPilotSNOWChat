@@ -1,8 +1,7 @@
 {
-  "name": "servicenow-azure-functions",
+  "name": "copilot-servicenow-api",
   "version": "1.0.0",
-  "description": "Azure Functions for ServiceNow integration with Table Storage",
-  "main": "index.js",
+  "description": "Azure Functions for Copilot ServiceNow Integration",
   "scripts": {
     "start": "func start",
     "test": "echo \"No tests yet\""
