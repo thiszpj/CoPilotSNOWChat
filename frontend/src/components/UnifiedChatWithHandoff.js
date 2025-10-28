@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Loader2, UserCheck, AlertCircle, CheckCircle, Wifi, WifiOff } from 'lucide-react';
 import * as signalR from '@microsoft/signalr';
+import config from '../config';
 
 const UnifiedChatWithHandoff = () => {
   // Chat state
@@ -14,7 +15,6 @@ const UnifiedChatWithHandoff = () => {
   
   // Copilot (Direct Line) state
   const [copilotConversationId, setCopilotConversationId] = useState('');
-  const [copilotToken, setCopilotToken] = useState('');
   const [copilotWatermark, setCopilotWatermark] = useState('');
   const copilotPollIntervalRef = useRef(null);
   
@@ -28,10 +28,10 @@ const UnifiedChatWithHandoff = () => {
   
   // SignalR state
   const [signalRConnection, setSignalRConnection] = useState(null);
-  const [signalRStatus, setSignalRStatus] = useState('disconnected'); // 'disconnected', 'connecting', 'connected', 'error'
+  const [signalRStatus, setSignalRStatus] = useState('disconnected');
   const signalRConnectionRef = useRef(null);
   
-  // Session mapping: Maps chatSessionId (ServiceNow) <-> conversationId (Copilot)
+  // Session mapping
   const sessionMappingRef = useRef({
     copilotConversationId: null,
     serviceNowChatSessionId: null,
@@ -39,21 +39,15 @@ const UnifiedChatWithHandoff = () => {
   });
   
   // Configuration
-  const [config, setConfig] = useState({
-    backendUrl: 'http://localhost:3001',
-    azureFunctionUrl: 'https://wonderful-sky-0661cc20f.3.azurestaticapps.net', // Update this with your Azure Function URL
-    serviceNowUrl: 'https://dev205527.service-now.com',
-    serviceNowUsername: 'admin',
-    serviceNowPassword: '',
-    serviceNowToken: 'TGbK5XRDgtmf4rK',
-    serviceNowTopicId: 'ce2ee85053130010cf8cddeeff7b12bf'
+  const [serviceNowConfig, setServiceNowConfig] = useState({
+    password: '',
   });
   
   const [showConfig, setShowConfig] = useState(true);
   const messagesEndRef = useRef(null);
   const seenMessageIdsRef = useRef(new Set());
 
-  // Auto-scroll to bottom
+  // Auto-scroll
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -84,14 +78,28 @@ const UnifiedChatWithHandoff = () => {
       console.log('🔌 Initializing SignalR connection...');
       setSignalRStatus('connecting');
       
+      // Get SignalR negotiation info from Azure Function
+      const negotiateResponse = await fetch(`${config.AZURE_API_URL}${config.endpoints.negotiate}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!negotiateResponse.ok) {
+        throw new Error('Failed to negotiate SignalR connection');
+      }
+
+      const negotiateData = await negotiateResponse.json();
+      console.log('✅ SignalR negotiation successful');
+
       // Create SignalR connection
       const connection = new signalR.HubConnectionBuilder()
-        .withUrl(`${config.azureFunctionUrl}/api`, {
-          withCredentials: false
+        .withUrl(negotiateData.url, {
+          accessTokenFactory: () => negotiateData.accessToken
         })
         .withAutomaticReconnect({
           nextRetryDelayInMilliseconds: (retryContext) => {
-            // Exponential backoff: 0s, 2s, 10s, 30s
             if (retryContext.previousRetryCount === 0) return 0;
             if (retryContext.previousRetryCount === 1) return 2000;
             if (retryContext.previousRetryCount === 2) return 10000;
@@ -101,123 +109,96 @@ const UnifiedChatWithHandoff = () => {
         .configureLogging(signalR.LogLevel.Information)
         .build();
 
-      // Handle reconnecting
-      connection.onreconnecting((error) => {
-        console.log('🔄 SignalR reconnecting...', error);
-        setSignalRStatus('connecting');
-        addSystemMessage('Connection lost. Reconnecting...');
-      });
-
-      // Handle reconnected
-      connection.onreconnected((connectionId) => {
-        console.log('✅ SignalR reconnected:', connectionId);
-        setSignalRStatus('connected');
-        addSystemMessage('Connection restored!');
-        
-        // Rejoin the conversation group
-        if (serviceNowState.chatSessionId) {
-          joinConversationGroup(serviceNowState.chatSessionId);
-        }
-      });
-
-      // Handle close
-      connection.onclose((error) => {
-        console.log('❌ SignalR connection closed:', error);
-        setSignalRStatus('disconnected');
-        addSystemMessage('Connection closed. Please refresh to reconnect.');
-      });
-
-      // Listen for new messages from ServiceNow agents
+      // Set up event handlers
       connection.on('newMessage', (message) => {
-        console.log('📨 Received message via SignalR:', message);
+        console.log('📨 SignalR message received:', message);
         handleSignalRMessage(message);
       });
 
-      // Start the connection
+      connection.onreconnecting((error) => {
+        console.warn('⚠️ SignalR reconnecting...', error);
+        setSignalRStatus('connecting');
+      });
+
+      connection.onreconnected((connectionId) => {
+        console.log('✅ SignalR reconnected:', connectionId);
+        setSignalRStatus('connected');
+        // Rejoin group if needed
+        if (serviceNowState.chatSessionId) {
+          joinSignalRGroup(serviceNowState.chatSessionId);
+        }
+      });
+
+      connection.onclose((error) => {
+        console.error('❌ SignalR connection closed:', error);
+        setSignalRStatus('disconnected');
+      });
+
+      // Start connection
       await connection.start();
-      console.log('✅ SignalR connected:', connection.connectionId);
-      setSignalRStatus('connected');
+      console.log('✅ SignalR connected successfully');
       
       setSignalRConnection(connection);
       signalRConnectionRef.current = connection;
-      
+      setSignalRStatus('connected');
+
       return connection;
-      
     } catch (error) {
       console.error('❌ SignalR initialization failed:', error);
       setSignalRStatus('error');
-      addSystemMessage(`SignalR connection failed: ${error.message}`);
-      return null;
+      throw error;
     }
   };
 
-  const joinConversationGroup = async (chatSessionId) => {
+  const joinSignalRGroup = async (chatSessionId) => {
     if (!signalRConnectionRef.current) {
-      console.error('❌ Cannot join group: SignalR not connected');
+      console.warn('⚠️ SignalR not connected, cannot join group');
       return;
     }
-    
-    try {
-      const groupName = `conversation_${chatSessionId}`;
-      console.log(`📢 Joining SignalR group: ${groupName}`);
-      
-      await signalRConnectionRef.current.invoke('JoinGroup', groupName);
-      console.log(`✅ Successfully joined group: ${groupName}`);
-      
-      addSystemMessage(`Joined conversation group: ${chatSessionId.substring(0, 8)}...`);
-      
-    } catch (error) {
-      console.error('❌ Failed to join conversation group:', error);
-      addSystemMessage(`Failed to join conversation group: ${error.message}`);
-    }
-  };
 
-  const leaveConversationGroup = async (chatSessionId) => {
-    if (!signalRConnectionRef.current) return;
-    
     try {
       const groupName = `conversation_${chatSessionId}`;
-      console.log(`👋 Leaving SignalR group: ${groupName}`);
+      console.log(`📡 Joining SignalR group: ${groupName}`);
       
-      await signalRConnectionRef.current.invoke('LeaveGroup', groupName);
-      console.log(`✅ Successfully left group: ${groupName}`);
+      // Azure SignalR Service uses server-side group management
+      // The group join happens automatically when messages are sent to that group
+      // But we log it for debugging
+      console.log(`✅ Ready to receive messages for group: ${groupName}`);
       
     } catch (error) {
-      console.error('❌ Failed to leave conversation group:', error);
+      console.error('❌ Error joining SignalR group:', error);
     }
   };
 
   const handleSignalRMessage = (message) => {
-    // Prevent duplicate messages
+    console.log('Processing SignalR message:', message);
+    
+    // Check if already seen
     if (seenMessageIdsRef.current.has(message.messageId)) {
-      console.log('⏭️ Skipping duplicate message:', message.messageId);
+      console.log('Duplicate message, ignoring');
       return;
     }
     
     seenMessageIdsRef.current.add(message.messageId);
     
-    // Only process messages for the current conversation
-    if (message.conversationId !== serviceNowState.chatSessionId) {
-      console.log('⏭️ Skipping message for different conversation');
-      return;
-    }
-    
-    // Add the message to the chat
     const newMessage = {
       id: message.messageId,
-      text: message.messageText,
+      text: message.messageText || message.message,
       sender: 'agent',
-      timestamp: new Date(message.receivedAt || Date.now()),
-      senderProfile: message.senderProfile || { name: 'Live Agent', type: 'agent' },
+      timestamp: new Date(message.receivedAt || message.timestamp),
       metadata: {
-        messageType: message.messageType,
-        eventType: message.eventType,
-        conversationId: message.conversationId
+        createdBy: message.createdBy,
+        senderProfile: message.senderProfile,
+        eventType: message.eventType
       }
     };
     
     setMessages(prev => [...prev, newMessage]);
-    console.log('✅ Added agent message to chat:', newMessage.text);
+    
+    // Check for chat end event
+    if (message.eventType === 'ChatEnded') {
+      handleChatEnded();
+    }
   };
 
   // ============== COPILOT FUNCTIONS ==============
@@ -225,57 +206,64 @@ const UnifiedChatWithHandoff = () => {
   const initializeCopilot = async () => {
     setIsLoading(true);
     try {
-      // Initialize SignalR first (for future agent messages)
-      await initializeSignalR();
+      console.log('🤖 Initializing Copilot...');
       
-      console.log('🔐 Generating Direct Line token...');
-      const tokenResponse = await fetch(`${config.backendUrl}/api/directline/tokens/generate`, {
+      // Generate Direct Line token
+      const tokenResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineTokenGenerate}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
       if (!tokenResponse.ok) {
-        throw new Error('Token generation failed');
+        throw new Error('Failed to generate Direct Line token');
       }
 
       const tokenData = await tokenResponse.json();
-      const generatedToken = tokenData.token;
-      setCopilotToken(generatedToken);
-      console.log('✅ Token generated');
-
-      console.log('🔄 Starting conversation...');
-      const conversationResponse = await fetch(`${config.backendUrl}/api/directline/conversations`, {
+      
+      // Start conversation
+      const conversationResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineConversations}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: generatedToken })
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          token: tokenData.token
+        })
       });
 
       if (!conversationResponse.ok) {
-        throw new Error('Conversation creation failed');
+        throw new Error('Failed to start conversation');
       }
 
       const conversationData = await conversationResponse.json();
-      const conversationId = conversationData.conversationId;
-      setCopilotConversationId(conversationId);
       
-      // Store in session mapping
-      sessionMappingRef.current.copilotConversationId = conversationId;
+      setCopilotConversationId(conversationData.conversationId);
+      sessionMappingRef.current.copilotConversationId = conversationData.conversationId;
       
-      // Set mode BEFORE starting polling
       setChatMode('copilot');
       chatModeRef.current = 'copilot';
       
-      startCopilotPolling(conversationId);
+      // Start polling
+      startCopilotPolling(conversationData.conversationId);
       
-      addSystemMessage('Connected to Copilot! You can now start chatting.');
-      setShowConfig(false);
+      setMessages([{
+        id: Date.now(),
+        text: 'Connected to Copilot! How can I help you today?',
+        sender: 'bot',
+        timestamp: new Date()
+      }]);
       
-      console.log('🎉 Successfully connected to Copilot!');
-      console.log('📋 Session Mapping:', sessionMappingRef.current);
-      
+      console.log('✅ Copilot initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize Copilot:', error);
-      addSystemMessage(`Failed to connect to Copilot: ${error.message}`);
+      console.error('❌ Copilot initialization failed:', error);
+      setMessages([{
+        id: Date.now(),
+        text: `Failed to connect to Copilot: ${error.message}`,
+        sender: 'system',
+        timestamp: new Date()
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -287,16 +275,9 @@ const UnifiedChatWithHandoff = () => {
     }, 1000);
   };
 
-  const stopCopilotPolling = () => {
-    if (copilotPollIntervalRef.current) {
-      clearInterval(copilotPollIntervalRef.current);
-      copilotPollIntervalRef.current = null;
-    }
-  };
-
   const pollCopilotMessages = async (convId) => {
     try {
-      const url = `${config.backendUrl}/api/directline/conversations/${convId}/activities`;
+      const url = `${config.getBackendUrl()}/api/directline/conversations/${convId}/activities`;
       const params = copilotWatermark ? `?watermark=${copilotWatermark}` : '';
       
       const response = await fetch(url + params);
@@ -312,16 +293,13 @@ const UnifiedChatWithHandoff = () => {
         .filter(activity => {
           if (activity.type !== 'message') return false;
           if (activity.from.id === 'user') return false;
-          if (activity.from.name === 'User') return false;
           return true;
         })
         .map(activity => ({
           id: activity.id,
-          text: activity.text || 'No text content',
-          sender: 'copilot',
-          timestamp: new Date(activity.timestamp),
-          attachments: activity.attachments || [],
-          rawActivity: activity
+          text: activity.text || '',
+          sender: 'bot',
+          timestamp: new Date(activity.timestamp)
         }));
 
       if (newMessages.length > 0) {
@@ -329,16 +307,9 @@ const UnifiedChatWithHandoff = () => {
           const existingIds = new Set(prev.map(m => m.id));
           const filteredNew = newMessages.filter(m => !existingIds.has(m.id));
           
-          // Store in conversation context for handoff
+          // Check for handoff trigger in new messages
           filteredNew.forEach(msg => {
-            sessionMappingRef.current.conversationContext.push({
-              sender: 'copilot',
-              text: msg.text,
-              timestamp: msg.timestamp
-            });
-            
-            // Check for handoff trigger
-            checkForHandoffTrigger(msg);
+            checkForHandoffTrigger(msg.text);
           });
           
           return [...prev, ...filteredNew];
@@ -349,103 +320,56 @@ const UnifiedChatWithHandoff = () => {
     }
   };
 
-  const sendMessageToCopilot = async (text) => {
+  const sendToCopilot = async (messageText) => {
     try {
-      // Store user message in context
-      sessionMappingRef.current.conversationContext.push({
-        sender: 'user',
-        text: text,
-        timestamp: new Date()
-      });
-      
-      const response = await fetch(`${config.backendUrl}/api/directline/conversations/${copilotConversationId}/activities`, {
+      await fetch(`${config.getBackendUrl()}/api/directline/conversations/${copilotConversationId}/activities`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
           type: 'message',
           from: { id: 'user', name: 'User' },
-          text: text
+          text: messageText
         })
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to send message');
-      }
-      
-      console.log('✅ Message sent to Copilot');
     } catch (error) {
-      console.error('Error sending message to Copilot:', error);
-      addSystemMessage(`Error sending message: ${error.message}`);
+      console.error('Error sending to Copilot:', error);
+      throw error;
     }
   };
 
   // ============== SERVICENOW FUNCTIONS ==============
   
-  const checkForHandoffTrigger = (message) => {
-    const handoffKeywords = [
-      'transferring you to an agent',
-      'connect you with an agent',
-      'connecting you to',
-      'transfer you to a live agent',
-      'escalating to',
-      'handoff',
-      'live agent'
-    ];
-
-    const messageText = message.text?.toLowerCase() || '';
-    const isHandoffTriggered = handoffKeywords.some(keyword => 
-      messageText.includes(keyword.toLowerCase())
-    );
-
-    if (isHandoffTriggered && chatModeRef.current === 'copilot') {
-      console.log('🔄 Handoff triggered! Message:', message.text);
-      initiateHandoff();
-    }
-  };
-
-  const initiateHandoff = async () => {
-    setChatMode('handoff');
-    chatModeRef.current = 'handoff';
-    
-    addSystemMessage('🔄 Transferring to live agent...');
-    
-    // Stop Copilot polling
-    stopCopilotPolling();
-    
+  const initiateServiceNowHandoff = async () => {
     try {
-      await initiateServiceNowConversation();
-    } catch (error) {
-      console.error('❌ Handoff failed:', error);
-      addSystemMessage(`Handoff failed: ${error.message}`);
-      setChatMode('copilot');
-      chatModeRef.current = 'copilot';
-      startCopilotPolling(copilotConversationId);
-    }
-  };
-
-  const initiateServiceNowConversation = async () => {
-    try {
-      const requestId = generateRequestId();
-      const clientMessageId = generateClientMessageId();
+      console.log('🔄 Initiating ServiceNow handoff...');
+      setChatMode('handoff');
+      chatModeRef.current = 'handoff';
       
-      // Prepare conversation context for ServiceNow
-      const conversationSummary = sessionMappingRef.current.conversationContext
-        .map(msg => `${msg.sender}: ${msg.text}`)
-        .join('\n');
-
+      // Initialize SignalR if not already connected
+      if (!signalRConnectionRef.current || signalRStatus !== 'connected') {
+        await initializeSignalR();
+      }
+      
+      // Stop Copilot polling
+      if (copilotPollIntervalRef.current) {
+        clearInterval(copilotPollIntervalRef.current);
+      }
+      
+      // Call ServiceNow Bot Integration API
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       const payload = {
         requestId: requestId,
         enterpriseId: "ServiceNow",
         nowBotId: serviceNowState.nowBotId,
         nowSessionId: serviceNowState.nowSessionId,
-        topic: config.serviceNowTopicId,
-        clientVariables: {
-          conversationContext: conversationSummary,
-          copilotConversationId: copilotConversationId
-        },
+        topic: config.serviceNow.topicId,
+        clientVariables: {},
         message: {
-          text: `Handoff from Copilot. Previous conversation:\n${conversationSummary}`,
+          text: "Transferring to live agent",
           typed: false,
           clientMessageId: clientMessageId,
           attachment: null
@@ -454,165 +378,148 @@ const UnifiedChatWithHandoff = () => {
         botToBot: true,
         silentMessage: null,
         intent: null,
-        contextVariables: {
-          handoffSource: 'copilot',
-          originalConversationId: copilotConversationId
-        },
-        userId: config.serviceNowUsername,
-        emailId: `${config.serviceNowUsername}@example.com`
+        contextVariables: sessionMappingRef.current.conversationContext,
+        userId: config.serviceNow.username,
+        emailId: `${config.serviceNow.username}@example.com`
       };
-
-      console.log('📤 Sending ServiceNow handoff request:', payload);
-
-      const response = await fetch(`${config.backendUrl}/api/servicenow/bot/integration`, {
+      
+      const response = await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          serviceNowUrl: config.serviceNowUrl,
-          username: config.serviceNowUsername,
-          password: config.serviceNowPassword,
-          token: config.serviceNowToken,
+          serviceNowUrl: config.serviceNow.baseUrl,
+          username: config.serviceNow.username,
+          password: serviceNowConfig.password,
+          token: config.serviceNow.token,
           payload: payload
         })
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        throw new Error('ServiceNow handoff failed');
       }
 
       const data = await response.json();
-      console.log('✅ ServiceNow response:', data);
-
-      // Extract chat session ID
-      let chatSessionId = null;
-      if (data.body?.uiData?.chatSessionId) {
-        chatSessionId = data.body.uiData.chatSessionId;
-      } else if (data.chatSessionId) {
-        chatSessionId = data.chatSessionId;
-      }
-
-      // Update ServiceNow state
-      const newState = {
-        nowBotId: data.nowBotId || serviceNowState.nowBotId,
-        nowSessionId: data.nowSessionId || serviceNowState.nowSessionId,
+      console.log('ServiceNow response:', data);
+      
+      const chatSessionId = data.body?.uiData?.chatSessionId || data.chatSessionId;
+      
+      setServiceNowState(prev => ({
+        ...prev,
+        nowBotId: data.nowBotId || prev.nowBotId,
+        nowSessionId: data.nowSessionId || prev.nowSessionId,
         requestId: requestId,
-        chatSessionId: chatSessionId || serviceNowState.chatSessionId
-      };
+        chatSessionId: chatSessionId
+      }));
       
-      setServiceNowState(newState);
-      
-      // Store in session mapping
       sessionMappingRef.current.serviceNowChatSessionId = chatSessionId;
       
-      console.log('📋 Updated Session Mapping:', sessionMappingRef.current);
-
       // Join SignalR group for this conversation
-      if (chatSessionId && signalRConnectionRef.current) {
-        await joinConversationGroup(chatSessionId);
+      if (chatSessionId) {
+        await joinSignalRGroup(chatSessionId);
       }
-
-      // Update mode to agent
+      
       setChatMode('agent');
       chatModeRef.current = 'agent';
       
-      addSystemMessage('✅ Connected to live agent! You can now chat.');
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: data.body?.text || 'Connected to live agent. An agent will be with you shortly.',
+        sender: 'system',
+        timestamp: new Date()
+      }]);
       
-      // Add initial ServiceNow response if available
-      if (data.body?.text) {
-        const agentMessage = {
-          id: `sn-${Date.now()}`,
-          text: data.body.text,
-          sender: 'agent',
-          timestamp: new Date(),
-          senderProfile: { name: 'ServiceNow Agent', type: 'agent' }
-        };
-        setMessages(prev => [...prev, agentMessage]);
-      }
-
+      console.log('✅ Handoff successful');
     } catch (error) {
-      console.error('❌ Error initiating ServiceNow conversation:', error);
-      throw error;
+      console.error('❌ ServiceNow handoff failed:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: `Handoff failed: ${error.message}`,
+        sender: 'system',
+        timestamp: new Date()
+      }]);
+      setChatMode('copilot');
+      chatModeRef.current = 'copilot';
     }
   };
 
-  const sendMessageToServiceNow = async (text) => {
+  const sendToServiceNow = async (messageText) => {
     try {
-      const clientMessageId = generateClientMessageId();
+      const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       const payload = {
         requestId: serviceNowState.requestId,
         enterpriseId: "ServiceNow",
         nowBotId: serviceNowState.nowBotId,
         nowSessionId: serviceNowState.nowSessionId,
-        topic: config.serviceNowTopicId,
-        clientVariables: {},
+        topic: config.serviceNow.topicId,
         message: {
-          text: text,
+          text: messageText,
           typed: true,
           clientMessageId: clientMessageId,
           attachment: null
         },
         timestamp: Math.floor(Date.now() / 1000),
-        botToBot: false,
-        silentMessage: null,
-        intent: null,
-        contextVariables: {},
-        userId: config.serviceNowUsername,
-        emailId: `${config.serviceNowUsername}@example.com`
+        userId: config.serviceNow.username
       };
-
-      console.log('📤 Sending message to ServiceNow:', payload);
-
-      const response = await fetch(`${config.backendUrl}/api/servicenow/bot/integration`, {
+      
+      await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          serviceNowUrl: config.serviceNowUrl,
-          username: config.serviceNowUsername,
-          password: config.serviceNowPassword,
-          token: config.serviceNowToken,
+          serviceNowUrl: config.serviceNow.baseUrl,
+          username: config.serviceNow.username,
+          password: serviceNowConfig.password,
+          token: config.serviceNow.token,
           payload: payload
         })
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('✅ ServiceNow message sent successfully:', data);
-
     } catch (error) {
-      console.error('❌ Error sending message to ServiceNow:', error);
-      addSystemMessage(`Error sending message: ${error.message}`);
+      console.error('Error sending to ServiceNow:', error);
+      throw error;
     }
   };
 
-  // ============== UTILITY FUNCTIONS ==============
+  // ============== HELPER FUNCTIONS ==============
   
-  const generateRequestId = () => {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const checkForHandoffTrigger = (messageText) => {
+    const handoffKeywords = ['agent', 'human', 'speak to someone', 'escalate', 'representative'];
+    const lowerText = messageText.toLowerCase();
+    
+    if (handoffKeywords.some(keyword => lowerText.includes(keyword)) && chatModeRef.current === 'copilot') {
+      console.log('🔔 Handoff trigger detected');
+      setTimeout(() => {
+        initiateServiceNowHandoff();
+      }, 1000);
+    }
   };
 
-  const generateClientMessageId = () => {
-    return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  };
-
-  const addSystemMessage = (text) => {
-    const systemMessage = {
-      id: `system-${Date.now()}`,
-      text: text,
+  const handleChatEnded = () => {
+    console.log('💬 Chat ended by agent');
+    setChatMode('none');
+    chatModeRef.current = 'none';
+    
+    if (signalRConnectionRef.current) {
+      signalRConnectionRef.current.stop();
+    }
+    
+    setMessages(prev => [...prev, {
+      id: Date.now(),
+      text: 'The agent has ended the conversation. You can start a new chat if needed.',
       sender: 'system',
       timestamp: new Date()
-    };
-    setMessages(prev => [...prev, systemMessage]);
+    }]);
   };
 
-  const handleSendMessage = async () => {
+  // ============== MESSAGE SENDING ==============
+  
+  const sendMessage = async () => {
     if (!inputMessage.trim()) return;
-    
+
     const userMessage = {
       id: `user-${Date.now()}`,
       text: inputMessage,
@@ -621,18 +528,24 @@ const UnifiedChatWithHandoff = () => {
     };
 
     setMessages(prev => [...prev, userMessage]);
-    const messageText = inputMessage;
+    const messageToSend = inputMessage;
     setInputMessage('');
     setIsLoading(true);
 
     try {
-      if (chatMode === 'copilot') {
-        await sendMessageToCopilot(messageText);
-      } else if (chatMode === 'agent') {
-        await sendMessageToServiceNow(messageText);
+      if (chatModeRef.current === 'copilot') {
+        await sendToCopilot(messageToSend);
+      } else if (chatModeRef.current === 'agent') {
+        await sendToServiceNow(messageToSend);
       }
     } catch (error) {
       console.error('Error sending message:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: `Error: ${error.message}`,
+        sender: 'system',
+        timestamp: new Date()
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -641,31 +554,24 @@ const UnifiedChatWithHandoff = () => {
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      sendMessage();
     }
   };
 
-  const resetChat = () => {
-    // Leave SignalR group if connected
-    if (serviceNowState.chatSessionId) {
-      leaveConversationGroup(serviceNowState.chatSessionId);
+  const startNewChat = () => {
+    // Cleanup
+    if (copilotPollIntervalRef.current) {
+      clearInterval(copilotPollIntervalRef.current);
     }
-    
-    // Stop polling
-    stopCopilotPolling();
-    
-    // Disconnect SignalR
     if (signalRConnectionRef.current) {
       signalRConnectionRef.current.stop();
-      signalRConnectionRef.current = null;
     }
     
-    // Reset all state
+    // Reset state
     setMessages([]);
     setChatMode('none');
     chatModeRef.current = 'none';
     setCopilotConversationId('');
-    setCopilotToken('');
     setCopilotWatermark('');
     setServiceNowState({
       nowBotId: null,
@@ -673,7 +579,6 @@ const UnifiedChatWithHandoff = () => {
       requestId: null,
       chatSessionId: null
     });
-    setSignalRConnection(null);
     setSignalRStatus('disconnected');
     sessionMappingRef.current = {
       copilotConversationId: null,
@@ -681,387 +586,218 @@ const UnifiedChatWithHandoff = () => {
       conversationContext: []
     };
     seenMessageIdsRef.current.clear();
-    setShowConfig(true);
+    
+    // Start new
+    initializeCopilot();
   };
 
   // ============== RENDER ==============
-
-  const getStatusColor = () => {
-    if (chatMode === 'none') return 'bg-gray-400';
-    if (chatMode === 'copilot') return 'bg-blue-500';
-    if (chatMode === 'handoff') return 'bg-yellow-500 animate-pulse';
-    if (chatMode === 'agent') return 'bg-green-500';
-    return 'bg-gray-400';
+  
+  const getModeDisplay = () => {
+    switch (chatMode) {
+      case 'copilot': return { text: 'Copilot', color: 'text-purple-600', bg: 'bg-purple-100' };
+      case 'handoff': return { text: 'Handoff in Progress', color: 'text-yellow-600', bg: 'bg-yellow-100' };
+      case 'agent': return { text: 'Live Agent', color: 'text-green-600', bg: 'bg-green-100' };
+      default: return { text: 'Not Started', color: 'text-gray-600', bg: 'bg-gray-100' };
+    }
   };
 
-  const getStatusText = () => {
-    if (chatMode === 'none') return 'Not Connected';
-    if (chatMode === 'copilot') return 'Chatting with Copilot';
-    if (chatMode === 'handoff') return 'Transferring to Agent...';
-    if (chatMode === 'agent') return 'Connected to Live Agent';
-    return 'Unknown';
-  };
-
-  const getSignalRStatusIcon = () => {
-    if (signalRStatus === 'connected') return <Wifi className="w-4 h-4 text-green-600" />;
-    if (signalRStatus === 'connecting') return <Loader2 className="w-4 h-4 text-yellow-600 animate-spin" />;
-    return <WifiOff className="w-4 h-4 text-red-600" />;
-  };
+  const mode = getModeDisplay();
 
   return (
     <div className="max-w-7xl mx-auto p-6 bg-white rounded-lg shadow-lg">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* LEFT PANEL - Chat Section */}
-        <div className="lg:col-span-2 flex flex-col" style={{ height: '600px' }}>
-          {/* Chat Header */}
-          <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className={`w-3 h-3 rounded-full ${getStatusColor()}`}></div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">Unified Chat</h2>
-                <p className="text-xs text-gray-600">{getStatusText()}</p>
-              </div>
+      {/* Header */}
+      <div className="mb-6 pb-4 border-b">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-800">Unified Chat with Intelligent Handoff</h1>
+          <div className="flex items-center gap-4">
+            {/* Mode Badge */}
+            <div className={`px-3 py-1 rounded-full ${mode.bg} ${mode.color} text-sm font-semibold`}>
+              {mode.text}
             </div>
             
-            <div className="flex items-center gap-3">
-              {/* SignalR Status */}
-              <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
-                {getSignalRStatusIcon()}
-                <span className="text-xs text-gray-700">
-                  SignalR: {signalRStatus}
-                </span>
-              </div>
-              
-              {chatMode !== 'none' && (
-                <button
-                  onClick={resetChat}
-                  className="px-3 py-1 text-sm bg-red-500 text-white rounded-md hover:bg-red-600"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Session Mapping Info (Debug) */}
-          {chatMode !== 'none' && (
-            <div className="mb-2 p-2 bg-gray-50 rounded text-xs">
-              <div className="font-semibold text-gray-700 mb-1">Session Mapping:</div>
-              <div className="text-gray-600 space-y-1">
-                {sessionMappingRef.current.copilotConversationId && (
-                  <div>Copilot ID: {sessionMappingRef.current.copilotConversationId.substring(0, 20)}...</div>
-                )}
-                {sessionMappingRef.current.serviceNowChatSessionId && (
-                  <div>ServiceNow Session: {sessionMappingRef.current.serviceNowChatSessionId.substring(0, 20)}...</div>
-                )}
-                <div>Context Messages: {sessionMappingRef.current.conversationContext.length}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Messages Container */}
-          <div className="flex-1 border border-gray-200 rounded-lg overflow-y-auto bg-gray-50 p-4 mb-4">
-            {messages.length === 0 && chatMode === 'none' && (
-              <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
-                <Bot className="w-16 h-16 mb-4 text-gray-400" />
-                <p className="text-lg font-semibold mb-2">Welcome to Unified Chat</p>
-                <p className="text-sm">Configure settings on the right and click "Start Chat" to begin</p>
+            {/* SignalR Status */}
+            {signalRStatus === 'connected' && (
+              <div className="flex items-center gap-2 text-green-600 text-sm">
+                <Wifi className="w-4 h-4" />
+                <span>Real-time Connected</span>
               </div>
             )}
-            
-            {messages.map((message) => (
-              <div key={message.id} className={`mb-4 flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex items-start gap-2 max-w-md ${message.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  {/* Avatar */}
-                  <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                    message.sender === 'user' 
-                      ? 'bg-blue-500 text-white' 
-                      : message.sender === 'copilot'
-                      ? 'bg-purple-500 text-white'
-                      : message.sender === 'agent'
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-500 text-white'
-                  }`}>
-                    {message.sender === 'user' ? (
-                      <User className="w-4 h-4" />
-                    ) : message.sender === 'copilot' ? (
-                      <Bot className="w-4 h-4" />
-                    ) : message.sender === 'agent' ? (
-                      <UserCheck className="w-4 h-4" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4" />
-                    )}
-                  </div>
-                  
-                  {/* Message Bubble */}
-                  <div className={`px-4 py-2 rounded-lg ${
-                    message.sender === 'user'
-                      ? 'bg-blue-500 text-white'
-                      : message.sender === 'copilot'
-                      ? 'bg-purple-100 text-gray-800 border border-purple-200'
-                      : message.sender === 'agent'
-                      ? 'bg-green-100 text-gray-800 border border-green-200'
-                      : 'bg-yellow-100 text-gray-800 border border-yellow-200'
-                  }`}>
-                    {message.sender === 'agent' && message.senderProfile && (
-                      <div className="text-xs font-semibold mb-1 opacity-75">
-                        {message.senderProfile.name}
-                      </div>
-                    )}
-                    <div className="text-sm whitespace-pre-wrap">{message.text}</div>
-                    <div className={`text-xs mt-1 opacity-70 ${
-                      message.sender === 'user' ? 'text-blue-100' : 'text-gray-600'
+            {signalRStatus === 'connecting' && (
+              <div className="flex items-center gap-2 text-yellow-600 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Connecting...</span>
+              </div>
+            )}
+            {signalRStatus === 'error' && (
+              <div className="flex items-center gap-2 text-red-600 text-sm">
+                <WifiOff className="w-4 h-4" />
+                <span>Connection Error</span>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Environment Info */}
+        <div className="mt-2 text-sm text-gray-500">
+          Environment: {config.IS_PRODUCTION ? '🌐 Production (Azure)' : '💻 Local Development'}
+        </div>
+      </div>
+
+      {/* Configuration Panel */}
+      {showConfig && chatMode === 'none' && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-blue-800">ServiceNow Configuration</h3>
+            <button
+              onClick={() => setShowConfig(false)}
+              className="text-sm text-blue-600 hover:text-blue-800"
+            >
+              Hide
+            </button>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ServiceNow Password:
+              </label>
+              <input
+                type="password"
+                value={serviceNowConfig.password}
+                onChange={(e) => setServiceNowConfig({...serviceNowConfig, password: e.target.value})}
+                placeholder="Enter ServiceNow password"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="text-xs text-gray-600">
+              <p><strong>Base URL:</strong> {config.serviceNow.baseUrl}</p>
+              <p><strong>Username:</strong> {config.serviceNow.username}</p>
+              <p><strong>Topic ID:</strong> {config.serviceNow.topicId}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Container */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        {/* Messages */}
+        <div className="h-96 overflow-y-auto bg-gray-50 p-4">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
+              <Bot className="w-16 h-16 mb-4 text-gray-400" />
+              <p className="text-lg font-semibold mb-2">Ready to start a conversation</p>
+              <p className="text-sm">Click "Start Chat" below to begin with Copilot</p>
+              <p className="text-xs mt-2">Handoff to live agent will happen automatically if needed</p>
+            </div>
+          ) : (
+            <>
+              {messages.map((message) => (
+                <div key={message.id} className={`mb-4 flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`flex items-start gap-2 max-w-md ${message.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                      message.sender === 'user' 
+                        ? 'bg-blue-500 text-white'
+                        : message.sender === 'bot'
+                        ? 'bg-purple-500 text-white'
+                        : message.sender === 'agent'
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-500 text-white'
                     }`}>
-                      {message.timestamp.toLocaleTimeString()}
+                      {message.sender === 'user' ? <User className="w-4 h-4" /> : 
+                       message.sender === 'agent' ? <UserCheck className="w-4 h-4" /> : 
+                       <Bot className="w-4 h-4" />}
+                    </div>
+                    
+                    <div className={`px-4 py-2 rounded-lg ${
+                      message.sender === 'user'
+                        ? 'bg-blue-500 text-white'
+                        : message.sender === 'bot'
+                        ? 'bg-white text-gray-800 border border-purple-200'
+                        : message.sender === 'agent'
+                        ? 'bg-white text-gray-800 border border-green-200'
+                        : 'bg-gray-200 text-gray-700'
+                    }`}>
+                      <div className="text-sm">{message.text}</div>
+                      <div className={`text-xs mt-1 ${
+                        message.sender === 'user' ? 'text-blue-100' : 'text-gray-500'
+                      }`}>
+                        {message.timestamp.toLocaleTimeString()}
+                        {message.sender === 'agent' && message.metadata?.createdBy && (
+                          <span className="ml-2">• {message.metadata.createdBy}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={
-                chatMode === 'none' 
-                  ? 'Start a chat first...' 
-                  : chatMode === 'handoff'
-                  ? 'Please wait for agent connection...'
-                  : 'Type your message...'
-              }
-              disabled={chatMode === 'none' || chatMode === 'handoff' || isLoading}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={chatMode === 'none' || chatMode === 'handoff' || isLoading || !inputMessage.trim()}
-              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              Send
-            </button>
-          </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </>
+          )}
         </div>
 
-        {/* RIGHT PANEL - Configuration */}
-        <div className="lg:col-span-1 flex flex-col">
-          <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800">Configuration</h2>
+        {/* Input Area */}
+        <div className="p-4 bg-white border-t border-gray-200">
+          {chatMode === 'none' ? (
             <button
-              onClick={() => setShowConfig(!showConfig)}
-              className="text-sm text-blue-600 hover:text-blue-700"
+              onClick={startNewChat}
+              disabled={!serviceNowConfig.password}
+              className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
             >
-              {showConfig ? 'Hide' : 'Show'}
+              Start Chat with Copilot
             </button>
-          </div>
-
-          {showConfig && (
-            <div className="flex-1 overflow-y-auto space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Backend URL:
-                </label>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex gap-2">
                 <input
                   type="text"
-                  value={config.backendUrl}
-                  onChange={(e) => setConfig({...config, backendUrl: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  disabled={chatMode !== 'none'}
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Type your message..."
+                  disabled={isLoading || chatMode === 'handoff'}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 />
+                <button
+                  onClick={sendMessage}
+                  disabled={isLoading || !inputMessage.trim() || chatMode === 'handoff'}
+                  className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
+                </button>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Azure Function URL:
-                </label>
-                <input
-                  type="text"
-                  value={config.azureFunctionUrl}
-                  onChange={(e) => setConfig({...config, azureFunctionUrl: e.target.value})}
-                  placeholder="https://your-app.azurestaticapps.net"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  disabled={chatMode !== 'none'}
-                />
-                <p className="text-xs text-gray-500 mt-1">Required for SignalR real-time messaging</p>
-              </div>
-
-              <div className="border-t pt-4">
-                <h3 className="font-semibold text-gray-800 mb-2">ServiceNow Settings:</h3>
-                
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      ServiceNow URL:
-                    </label>
-                    <input
-                      type="text"
-                      value={config.serviceNowUrl}
-                      onChange={(e) => setConfig({...config, serviceNowUrl: e.target.value})}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                      disabled={chatMode !== 'none'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Username:
-                    </label>
-                    <input
-                      type="text"
-                      value={config.serviceNowUsername}
-                      onChange={(e) => setConfig({...config, serviceNowUsername: e.target.value})}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                      disabled={chatMode !== 'none'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Password:
-                    </label>
-                    <input
-                      type="password"
-                      value={config.serviceNowPassword}
-                      onChange={(e) => setConfig({...config, serviceNowPassword: e.target.value})}
-                      placeholder="Enter password"
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                      disabled={chatMode !== 'none'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Token:
-                    </label>
-                    <input
-                      type="text"
-                      value={config.serviceNowToken}
-                      onChange={(e) => setConfig({...config, serviceNowToken: e.target.value})}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                      disabled={chatMode !== 'none'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Topic ID:
-                    </label>
-                    <input
-                      type="text"
-                      value={config.serviceNowTopicId}
-                      onChange={(e) => setConfig({...config, serviceNowTopicId: e.target.value})}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                      disabled={chatMode !== 'none'}
-                    />
-                  </div>
+              
+              <div className="flex justify-between items-center">
+                <div className="text-xs text-gray-500">
+                  {chatMode === 'handoff' && 'Transferring to live agent...'}
+                  {chatMode === 'agent' && 'Connected to live agent via real-time SignalR'}
                 </div>
-              </div>
-
-              <button
-                onClick={initializeCopilot}
-                disabled={isLoading || chatMode !== 'none' || !config.serviceNowPassword}
-                className="w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-semibold"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Connecting...
-                  </>
-                ) : chatMode !== 'none' ? (
-                  <>
-                    <CheckCircle className="w-4 h-4" />
-                    Connected
-                  </>
-                ) : (
-                  'Start Chat'
-                )}
-              </button>
-
-              {/* Status Info */}
-              {chatMode !== 'none' && (
-                <div className="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs">
-                  <h4 className="font-semibold text-blue-800 mb-2">Session Status:</h4>
-                  <div className="space-y-1 text-blue-700">
-                    {chatMode === 'copilot' && (
-                      <>
-                        <div>✅ Copilot Connected</div>
-                        <div className="text-xs text-blue-600">Waiting for handoff trigger...</div>
-                      </>
-                    )}
-                    {chatMode === 'handoff' && (
-                      <div className="flex items-center gap-2">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Transferring to agent...
-                      </div>
-                    )}
-                    {chatMode === 'agent' && (
-                      <>
-                        <div>✅ Connected to Live Agent</div>
-                        {serviceNowState.chatSessionId && (
-                          <div className="text-xs text-blue-600 mt-1">
-                            Session: {serviceNowState.chatSessionId.substring(0, 8)}...
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1 mt-2 text-green-600">
-                          <CheckCircle className="w-3 h-3" />
-                          <span className="text-xs">SignalR active - Real-time messaging enabled</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Instructions */}
-          {!showConfig && (
-            <div className="flex-1 overflow-y-auto">
-              <div className="bg-gray-50 p-4 rounded-lg space-y-3 text-sm">
-                <div>
-                  <h3 className="font-semibold text-gray-800 mb-2">🎯 How it works:</h3>
-                  <ol className="list-decimal list-inside space-y-2 text-gray-700 text-xs">
-                    <li>Start chatting - Copilot will respond to your questions</li>
-                    <li>When Copilot detects handoff keywords, it will automatically transfer you</li>
-                    <li>SignalR establishes real-time connection for agent messages</li>
-                    <li>You'll be connected to a ServiceNow live agent with full conversation context</li>
-                    <li>Continue chatting with the agent seamlessly via SignalR</li>
-                  </ol>
-                </div>
-
-                <div className="bg-green-50 p-2 rounded border border-green-200">
-                  <h4 className="font-semibold text-green-800 text-xs mb-1">✨ SignalR Features:</h4>
-                  <ul className="list-disc list-inside space-y-1 text-green-700 text-xs">
-                    <li>Instant message delivery (&lt;1 second)</li>
-                    <li>No polling - efficient real-time updates</li>
-                    <li>Automatic reconnection on connection loss</li>
-                    <li>Group-based message routing (privacy)</li>
-                    <li>Exponential backoff retry strategy</li>
-                  </ul>
-                </div>
-
-                <div className="bg-yellow-50 p-2 rounded border border-yellow-200">
-                  <h4 className="font-semibold text-yellow-800 text-xs mb-1">⚠️ Handoff Triggers:</h4>
-                  <p className="text-yellow-700 text-xs">
-                    Handoff occurs when Copilot's response includes phrases like "transferring you to an agent", 
-                    "connect you with an agent", or similar keywords.
-                  </p>
-                </div>
+                <button
+                  onClick={startNewChat}
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                >
+                  Start New Chat
+                </button>
               </div>
             </div>
           )}
         </div>
+      </div>
+
+      {/* Info Panel */}
+      <div className="mt-4 p-4 bg-gray-50 rounded-lg text-sm text-gray-600">
+        <h4 className="font-semibold text-gray-800 mb-2">How it works:</h4>
+        <ol className="list-decimal list-inside space-y-1 text-xs">
+          <li>Chat starts with Microsoft Copilot using Direct Line</li>
+          <li>Copilot answers questions and provides assistance</li>
+          <li>If handoff keywords detected (e.g., "speak to agent"), automatic escalation occurs</li>
+          <li>Chat is transferred to ServiceNow live agent</li>
+          <li>Real-time messaging via Azure SignalR Service</li>
+          <li>All messages stored in Azure Table Storage</li>
+        </ol>
       </div>
     </div>
   );

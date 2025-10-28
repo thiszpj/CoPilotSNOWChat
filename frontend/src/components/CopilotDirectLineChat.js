@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Loader2, Settings, MessageSquare } from 'lucide-react';
+import config from '../config';
 
 const CopilotDirectLineChat = () => {
   const [messages, setMessages] = useState([]);
@@ -7,9 +8,8 @@ const CopilotDirectLineChat = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState('');
-  const [token, setToken] = useState('');
   const [watermark, setWatermark] = useState('');
-  const [backendUrl, setBackendUrl] = useState('http://localhost:3001');
+  const [backendUrl, setBackendUrl] = useState(config.getBackendUrl());
   const messagesEndRef = useRef(null);
   const pollIntervalRef = useRef(null);
 
@@ -18,7 +18,6 @@ const CopilotDirectLineChat = () => {
   };
 
   useEffect(() => {
-    // Simple auto-scroll to bottom for new messages
     const timeoutId = setTimeout(() => {
       scrollToBottom();
     }, 100);
@@ -40,7 +39,7 @@ const CopilotDirectLineChat = () => {
 
       // Step 1: Generate a token using the secret
       console.log('🔑 Generating Direct Line token...');
-      const tokenResponse = await fetch(`${backendUrl}/api/directline/tokens/generate`, {
+      const tokenResponse = await fetch(`${backendUrl}${config.endpoints.directLineTokenGenerate}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -61,12 +60,11 @@ const CopilotDirectLineChat = () => {
       }
       
       const generatedToken = tokenData.token;
-      setToken(generatedToken);
       console.log('✅ Token generated successfully');
 
       // Step 2: Start conversation using the generated token
       console.log('🔄 Starting conversation with token...');
-      const conversationResponse = await fetch(`${backendUrl}/api/directline/conversations`, {
+      const conversationResponse = await fetch(`${backendUrl}${config.endpoints.directLineConversations}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -139,16 +137,14 @@ const CopilotDirectLineChat = () => {
       // Process new activities - filter out echo messages and user messages
       const newMessages = data.activities
         .filter(activity => {
-          // Only include bot messages (not user messages or echoes)
           if (activity.type !== 'message') return false;
-          if (activity.from.id === 'user') return false; // Skip user messages (echoes)
-          if (activity.from.name === 'User') return false; // Skip user name echoes
+          if (activity.from.id === 'user') return false;
+          if (activity.from.name === 'User') return false;
           
-          // Skip messages that are just echoing what the user said
           const currentUserMessages = messages.filter(m => m.sender === 'user').map(m => m.text);
           if (currentUserMessages.includes(activity.text)) return false;
           
-          return true; // Include actual bot responses
+          return true;
         })
         .map(activity => ({
           id: activity.id,
@@ -222,7 +218,6 @@ const CopilotDirectLineChat = () => {
     }
     setIsConnected(false);
     setConversationId('');
-    setToken('');
     setWatermark('');
     setMessages([]);
   };
@@ -268,7 +263,7 @@ const CopilotDirectLineChat = () => {
             )}
           </div>
 
-          {/* Messages Container - Scrollable */}
+          {/* Messages Container */}
           <div className="flex-1 border border-gray-200 rounded-lg overflow-y-auto bg-gray-50 p-4 mb-4">
             {messages.length === 0 && !isConnected && (
               <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
@@ -305,7 +300,6 @@ const CopilotDirectLineChat = () => {
                       {message.timestamp.toLocaleTimeString()}
                     </div>
                     
-                    {/* Handle attachments */}
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="mt-2">
                         {message.attachments.map((attachment, index) => (
@@ -370,10 +364,14 @@ const CopilotDirectLineChat = () => {
               type="text"
               value={backendUrl}
               onChange={(e) => setBackendUrl(e.target.value)}
-              placeholder="http://localhost:3001"
+              placeholder={config.getBackendUrl()}
               disabled={isConnected}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 text-sm"
             />
+            
+            <div className="mt-2 text-xs text-gray-500">
+              {config.IS_PRODUCTION ? '🌐 Production mode' : '💻 Local development mode'}
+            </div>
             
             <button
               onClick={initializeDirectLine}
@@ -399,20 +397,20 @@ const CopilotDirectLineChat = () => {
             <div className="text-sm text-gray-600 space-y-3">
               <div className="bg-blue-50 p-3 rounded-lg">
                 <h4 className="font-semibold text-blue-800 mb-2">📋 Quick Setup:</h4>
-                <ol className="list-decimal list-inside space-y-1 text-blue-700">
+                <ol className="list-decimal list-inside space-y-1 text-blue-700 text-xs">
                   <li>Create Azure Bot Service</li>
                   <li>Enable Direct Line channel</li>
                   <li>Copy the secret key</li>
-                  <li>Add to <code className="bg-blue-200 px-1 rounded">backend/.env</code></li>
-                  <li>Start backend: <code className="bg-blue-200 px-1 rounded">npm run dev</code></li>
-                  <li>Click "Connect to Copilot" above</li>
+                  <li>Add to backend/.env</li>
+                  <li>Start backend: npm run dev</li>
+                  <li>Click "Connect to Copilot"</li>
                 </ol>
               </div>
 
               <div className="bg-green-50 p-3 rounded-lg">
                 <h4 className="font-semibold text-green-800 mb-2">✅ Features:</h4>
-                <ul className="list-disc list-inside space-y-1 text-green-700">
-                  <li>Secure token-based authentication</li>
+                <ul className="list-disc list-inside space-y-1 text-green-700 text-xs">
+                  <li>Secure token-based auth</li>
                   <li>Real-time message polling</li>
                   <li>CORS-free backend proxy</li>
                   <li>Attachment support</li>
@@ -420,23 +418,12 @@ const CopilotDirectLineChat = () => {
                 </ul>
               </div>
 
-              <div className="bg-yellow-50 p-3 rounded-lg">
-                <h4 className="font-semibold text-yellow-800 mb-2">🔧 Environment Setup:</h4>
-                <pre className="text-xs bg-gray-800 text-green-400 p-2 rounded mt-2">
-{`# backend/.env
-DIRECTLINE_SECRET=your_key_here
-PORT=3001`}
-                </pre>
-              </div>
-
               <div className="bg-gray-50 p-3 rounded-lg">
-                <h4 className="font-semibold text-gray-800 mb-2">🛠️ Troubleshooting:</h4>
-                <ul className="list-disc list-inside space-y-1 text-gray-700 text-xs">
-                  <li>Backend health: <code className="bg-gray-200 px-1">/api/health</code></li>
-                  <li>Check console for errors</li>
-                  <li>Verify Direct Line secret</li>
-                  <li>Ensure both services are running</li>
-                </ul>
+                <h4 className="font-semibold text-gray-800 mb-2">🛠️ Environment:</h4>
+                <div className="text-xs text-gray-700 space-y-1">
+                  <div><strong>Mode:</strong> {config.IS_PRODUCTION ? 'Production (Azure)' : 'Development (Local)'}</div>
+                  <div><strong>Backend:</strong> {config.getBackendUrl()}</div>
+                </div>
               </div>
             </div>
           </div>
