@@ -20,16 +20,6 @@ jobs:
           submodules: true
           lfs: false
       
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      - name: Install API Dependencies
-        run: |
-          cd api
-          npm install
-      
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
@@ -43,7 +33,6 @@ jobs:
           app_location: "frontend"
           api_location: "api"
           output_location: "build"
-          skip_api_build: true
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:
