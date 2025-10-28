@@ -1,22 +1,30 @@
 module.exports = async function (context, req) {
     context.log('🔔 ServiceNow message received');
     
-    // Validate webhook token for security
-    const webhookSecret = process.env.SERVICENOW_WEBHOOK_SECRET;
-    const receivedToken = req.headers['x-servicenow-token'];
-    
-    if (webhookSecret && receivedToken !== webhookSecret) {
-        context.log.error('❌ Invalid webhook token');
-        context.res = {
-            status: 401,
-            body: { error: 'Unauthorized: Invalid token' }
-        };
-        return;
-    }
-    
     try {
+        // Validate webhook token for security
+        const webhookSecret = process.env.SERVICENOW_WEBHOOK_SECRET;
+        const receivedToken = req.headers['x-servicenow-token'];
+        
+        if (webhookSecret && receivedToken !== webhookSecret) {
+            context.log.error('❌ Invalid webhook token');
+            context.res = {
+                status: 401,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: { 
+                    success: false,
+                    error: 'Unauthorized: Invalid token' 
+                }
+            };
+            return;
+        }
+        
         // Extract message data from ServiceNow
         const messageData = req.body;
+        context.log('📦 Message data received:', JSON.stringify(messageData, null, 2));
         
         // Validate required fields
         if (!messageData.conversationId && !messageData.conversation_id) {
@@ -64,23 +72,36 @@ module.exports = async function (context, req) {
         
         context.log('📝 Normalized message:', JSON.stringify(normalizedMessage, null, 2));
         
-        // Store in Table Storage
+        // Store in Table Storage (using output binding)
         context.bindings.messageTable = {
             PartitionKey: conversationId,
             RowKey: messageId,
-            ...normalizedMessage
+            conversationId: normalizedMessage.conversationId,
+            chatSessionId: normalizedMessage.chatSessionId,
+            messageId: normalizedMessage.messageId,
+            createdOn: normalizedMessage.createdOn,
+            createdBy: normalizedMessage.createdBy,
+            messageType: normalizedMessage.messageType,
+            messageText: normalizedMessage.messageText,
+            eventType: normalizedMessage.eventType,
+            avatarDisplayed: normalizedMessage.avatarDisplayed,
+            notifyUser: normalizedMessage.notifyUser,
+            senderProfile: JSON.stringify(normalizedMessage.senderProfile),
+            rawPayload: normalizedMessage.rawPayload,
+            receivedAt: normalizedMessage.receivedAt,
+            source: normalizedMessage.source
         };
         
-        context.log('💾 Message stored in Table Storage');
+        context.log('💾 Message queued for Table Storage');
         
-        // Broadcast via SignalR to specific conversation group
+        // Broadcast via SignalR to specific conversation group (using output binding)
         context.bindings.signalRMessages = [{
             target: 'newMessage',
             arguments: [normalizedMessage],
             groupName: `conversation_${conversationId}`
         }];
         
-        context.log(`📡 Message broadcasted to SignalR group: conversation_${conversationId}`);
+        context.log(`📡 Message queued for SignalR broadcast to group: conversation_${conversationId}`);
         
         // Return success response
         context.res = {
@@ -98,14 +119,22 @@ module.exports = async function (context, req) {
             }
         };
         
+        context.log('✅ Request completed successfully');
+        
     } catch (error) {
         context.log.error('❌ Error processing ServiceNow message:', error);
+        context.log.error('Stack trace:', error.stack);
         
         context.res = {
             status: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
             body: {
                 success: false,
                 error: error.message,
+                stack: error.stack,
                 timestamp: new Date().toISOString()
             }
         };

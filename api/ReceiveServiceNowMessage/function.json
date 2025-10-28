@@ -23,7 +23,7 @@
       "type": "table",
       "name": "messageTable",
       "tableName": "ServiceNowMessages",
-      "connection": "AzureWebJobsStorage",
+      "connection": "AZURE_STORAGE_CONNECTION_STRING",
       "direction": "out"
     }
   ]
