@@ -21,14 +21,34 @@ module.exports = async function (context, req) {
     }
     
     try {
-        const connectionString = process.env.AzureWebJobsStorage;
+        // Try multiple sources for connection string
+        let connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING 
+                            || process.env.AzureWebJobsStorage;
         
         if (!connectionString) {
-            throw new Error('AzureWebJobsStorage connection string not configured');
+            // For Azure Static Web Apps, storage might be auto-provided
+            // Return empty messages if storage not configured yet
+            context.log.warn('⚠️ Storage not configured, returning empty messages');
+            
+            context.res = {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: {
+                    success: true,
+                    conversationId: conversationId,
+                    messageCount: 0,
+                    messages: [],
+                    retrievedAt: new Date().toISOString(),
+                    note: 'Storage not configured - no messages available'
+                }
+            };
+            return;
         }
         
         const tableName = 'ServiceNowMessages';
-        
         const tableClient = TableClient.fromConnectionString(connectionString, tableName);
         
         // Ensure table exists
@@ -36,12 +56,12 @@ module.exports = async function (context, req) {
             await tableClient.createTable();
             context.log('✅ Table created or already exists');
         } catch (err) {
-            if (err.statusCode !== 409) { // 409 = already exists, which is fine
+            if (err.statusCode !== 409) {
                 context.log.warn('Table creation warning:', err.message);
             }
         }
         
-        // Query messages for this conversation
+        // Query messages
         const messages = [];
         
         try {
@@ -52,7 +72,6 @@ module.exports = async function (context, req) {
             });
             
             for await (const entity of entities) {
-                // Parse senderProfile if it's a string
                 let senderProfile = entity.senderProfile;
                 if (typeof senderProfile === 'string') {
                     try {
@@ -81,10 +100,9 @@ module.exports = async function (context, req) {
             }
         } catch (queryErr) {
             context.log.warn('Query warning:', queryErr.message);
-            // If table doesn't exist yet, that's okay - return empty messages
         }
         
-        // Sort by timestamp (oldest first)
+        // Sort by timestamp
         messages.sort((a, b) => {
             const dateA = new Date(a.receivedAt || a.timestamp || 0);
             const dateB = new Date(b.receivedAt || b.timestamp || 0);
