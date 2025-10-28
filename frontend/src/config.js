@@ -24,12 +24,12 @@ const config = {
     serviceNowReceiveMessage: '/servicenow/receive-message',
     serviceNowGetMessages: '/servicenow/get-messages',
     
-    // Direct Line (via backend proxy)
-    directLineTokenGenerate: '/directline/tokens/generate',
-    directLineConversations: '/directline/conversations',
+    // Direct Line (via backend proxy) - ADD /api prefix
+    directLineTokenGenerate: '/api/directline/tokens/generate',
+    directLineConversations: '/api/directline/conversations',
     
-    // ServiceNow Bot Integration (via backend proxy)
-    serviceNowBotIntegration: '/servicenow/bot/integration',
+    // ServiceNow Bot Integration (via backend proxy) - ADD /api prefix
+    serviceNowBotIntegration: '/api/servicenow/bot/integration',
   },
   
   // ServiceNow Configuration
