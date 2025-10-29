@@ -192,10 +192,9 @@ app.get('/api/directline/conversations/:conversationId/activities', async (req, 
   }
 });
 
-// ServiceNow Bot Integration Proxy
-// ServiceNow Bot Integration Proxy
+// ServiceNow Bot Integration Proxy - FIXED VERSION
 app.post('/api/servicenow/bot/integration', async (req, res) => {
-    console.log('🔄 ServiceNow Bot Integration proxy called');
+    console.log('📄 ServiceNow Bot Integration proxy called');
     
     try {
         const { serviceNowUrl, username, password, token, payload } = req.body;
@@ -215,16 +214,19 @@ app.post('/api/servicenow/bot/integration', async (req, res) => {
         console.log('🔑 Using token:', token.substring(0, 10) + '...');
         console.log('📋 Payload:', JSON.stringify(payload, null, 2));
         
+        // FIXED: Use token from request body (not hardcoded)
+        // Token header must come first (as per Postman working example)
         const headers = {
+            'Token': token,
             'Content-Type': 'application/json',
             'Authorization': `Basic ${authString}`,
-            'Token': 'TGbK5XRDgtmf4rK'  // ServiceNow token in header
+            'Accept': 'application/json'
         };
         
-        console.log('📤 Request headers:', {
+        console.log('🔤 Request headers:', {
+            'Token': token.substring(0, 20) + '...',
             'Content-Type': headers['Content-Type'],
-            'Authorization': 'Basic [HIDDEN]',
-            'X-Token': token.substring(0, 20) + '...'
+            'Authorization': 'Basic [HIDDEN]'
         });
         
         const response = await fetch(`${serviceNowUrl}/api/sn_va_as_service/bot/integration`, {
@@ -259,8 +261,6 @@ app.post('/api/servicenow/bot/integration', async (req, res) => {
     }
 });
 
-
-// ServiceNow Get Messages Proxy - Fetch conversation messages
 // ServiceNow Get Messages Proxy - Polls for agent messages in a specific conversation
 app.post('/api/servicenow/get-messages', async (req, res) => {
     console.log('🔍 ServiceNow Get Messages proxy called');
@@ -279,8 +279,7 @@ app.post('/api/servicenow/get-messages', async (req, res) => {
         // Create Basic Auth header
         const authString = Buffer.from(`${username}:${password}`).toString('base64');
         
-        // ✅ FIXED: Build query string with conversation filter included
-        // This filters messages for THIS specific conversation only
+        // Build query string with conversation filter included
         const query = `q_data_message_type=systemTextMessage^direction=outbound^is_agent=true^conversation=${conversationId}^ORDERBYDESCsend_time`;
         const queryLimit = limit || 100;
         const url = `${serviceNowUrl}/api/now/table/sys_cs_message?sysparm_query=${encodeURIComponent(query)}&sysparm_limit=${queryLimit}`;
@@ -288,7 +287,6 @@ app.post('/api/servicenow/get-messages', async (req, res) => {
         console.log('📤 Fetching messages from ServiceNow');
         console.log('🔑 Conversation ID:', conversationId);
         console.log('🔍 Query:', query);
-        console.log('🌐 Full URL:', url);
         
         const response = await fetch(url, {
             method: 'GET',
