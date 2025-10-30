@@ -364,8 +364,8 @@ const UnifiedChatWithHandoff = () => {
       const payload = {
         requestId: requestId,
         enterpriseId: "ServiceNow",
-        nowBotId: serviceNowState.nowBotId,
-        nowSessionId: serviceNowState.nowSessionId,
+        nowBotId: serviceNowState.nowBotId || "",
+        nowSessionId: serviceNowState.nowSessionId || "",
         topic: config.serviceNow.topicId,
         clientVariables: {},
         message: {
