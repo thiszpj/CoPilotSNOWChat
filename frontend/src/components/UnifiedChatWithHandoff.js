@@ -494,6 +494,7 @@ const UnifiedChatWithHandoff = () => {
     
     if (handoffKeywords.some(keyword => lowerText.includes(keyword)) && chatModeRef.current === 'copilot') {
       console.log('🔔 Handoff trigger detected');
+      chatModeRef.current = 'handoff'; 
       setTimeout(() => {
         initiateServiceNowHandoff();
       }, 1000);

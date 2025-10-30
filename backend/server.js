@@ -198,13 +198,15 @@ app.post('/api/servicenow/bot/integration', async (req, res) => {
     
     try {
         const { serviceNowUrl, username, password, token, payload } = req.body;
-        
+        console.log('🔍 Password received (first 10 chars):', password.substring(0, 5));
+        console.log('🔍 Password length:', password.length);
         // Validate required parameters
         if (!serviceNowUrl || !username || !password || !token || !payload) {
             console.error('❌ Missing required parameters');
             return res.status(400).json({ 
                 error: 'Missing required parameters: serviceNowUrl, username, password, token, payload' 
             });
+            
         }
         
         // Create Basic Auth header
