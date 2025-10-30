@@ -35,7 +35,9 @@ app.get('/api/health', (req, res) => {
 // Generate Direct Line token (recommended approach)
 app.post('/api/directline/tokens/generate', async (req, res) => {
   console.log('🔑 Generating Direct Line token...');
-  
+  console.log('🔍 Secret (first 10 chars):', DIRECTLINE_SECRET.substring(0, 10));
+  console.log('🔍 Secret (last 20 chars):', DIRECTLINE_SECRET.substring(DIRECTLINE_SECRET.length - 20));
+  console.log('🔍 Secret length:', DIRECTLINE_SECRET.length);
   try {
     if (!DIRECTLINE_SECRET || DIRECTLINE_SECRET === 'YOUR_DIRECTLINE_SECRET_HERE') {
       throw new Error('Direct Line secret not configured. Please set DIRECTLINE_SECRET in .env file');
@@ -46,10 +48,8 @@ app.post('/api/directline/tokens/generate', async (req, res) => {
       headers: {
         'Authorization': `Bearer ${DIRECTLINE_SECRET}`,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        User: { Id: `user-${Date.now()}` } // Optional: specify user ID
-      })
+      }
+      
     });
 
     if (!response.ok) {

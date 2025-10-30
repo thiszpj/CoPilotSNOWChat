@@ -369,7 +369,7 @@ const UnifiedChatWithHandoff = () => {
         topic: config.serviceNow.topicId,
         clientVariables: {},
         message: {
-          text: "Transferring to live agent",
+          text: "Copilot Handoff Test",
           typed: false,
           clientMessageId: clientMessageId,
           attachment: null
