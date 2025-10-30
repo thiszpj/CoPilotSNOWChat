@@ -398,6 +398,8 @@ const UnifiedChatWithHandoff = () => {
       });
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Backend error:', response.status, errorData);
         throw new Error('ServiceNow handoff failed');
       }
 
