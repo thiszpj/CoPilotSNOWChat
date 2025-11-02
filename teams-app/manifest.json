@@ -1,0 +1,45 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "57ad0c0b-469b-41ea-dca0-be67b0f5cae4",
+  "packageName": "com.copilotsnow.supportchat",
+  "developer": {
+    "name": "Lateetud Inc",
+    "websiteUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
+    "privacyUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
+    "termsOfUseUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "Copilot SNOW Support",
+    "full": "Copilot with ServiceNow Live Agent Support"
+  },
+  "description": {
+    "short": "AI-powered support with live agent escalation",
+    "full": "Get instant help from our AI Copilot or escalate to a live ServiceNow agent for complex issues. Seamless transition from AI to human support."
+  },
+  "accentColor": "#6264A7",
+  "staticTabs": [
+    {
+      "entityId": "copilotchat",
+      "name": "Support Chat",
+      "contentUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
+      "scopes": [
+        "personal"
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "wonderful-sky-0661cc20f.3.azurestaticapps.net",
+    "copilotsnow-backend-api-exb4e5dtf3gkgjb2.eastus-01.azurewebsites.net",
+    "signalr-copilotsnowchat.service.signalr.net"
+  ]
+}
