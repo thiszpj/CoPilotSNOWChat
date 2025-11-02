@@ -150,25 +150,60 @@ const UnifiedChatWithHandoff = () => {
     }
   };
 
-  const joinSignalRGroup = async (chatSessionId) => {
-    if (!signalRConnectionRef.current) {
-      console.warn('⚠️ SignalR not connected, cannot join group');
-      return;
-    }
+  // const joinSignalRGroup = async (chatSessionId) => {
+  //   if (!signalRConnectionRef.current) {
+  //     console.warn('⚠️ SignalR not connected, cannot join group');
+  //     return;
+  //   }
 
-    try {
-      const groupName = `conversation_${chatSessionId}`;
-      console.log(`📡 Joining SignalR group: ${groupName}`);
+  //   try {
+  //     const groupName = `conversation_${chatSessionId}`;
+  //     console.log(`📡 Joining SignalR group: ${groupName}`);
       
-      // Azure SignalR Service uses server-side group management
-      // The group join happens automatically when messages are sent to that group
-      // But we log it for debugging
-      console.log(`✅ Ready to receive messages for group: ${groupName}`);
+  //     // Azure SignalR Service uses server-side group management
+  //     // The group join happens automatically when messages are sent to that group
+  //     // But we log it for debugging
+  //     console.log(`✅ Ready to receive messages for group: ${groupName}`);
       
-    } catch (error) {
-      console.error('❌ Error joining SignalR group:', error);
+  //   } catch (error) {
+  //     console.error('❌ Error joining SignalR group:', error);
+  //   }
+  // };
+  const joinSignalRGroup = async (chatSessionId) => {
+  if (!signalRConnectionRef.current) {
+    console.warn('⚠️ SignalR not connected, cannot join group');
+    return;
+  }
+
+  try {
+    const groupName = `conversation_${chatSessionId}`;
+    const connectionId = signalRConnectionRef.current.connectionId;
+    
+    console.log(`📡 Attempting to join SignalR group: ${groupName}`);
+    console.log(`🔌 Connection ID: ${connectionId}`);
+    
+    // Call Azure Function to add connection to group
+    const response = await fetch(`${config.getBackendUrl()}/api/joingroup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connectionId: connectionId,
+        groupName: groupName
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to join group: ${errorText}`);
     }
-  };
+    
+    const result = await response.json();
+    console.log(`✅ Successfully joined SignalR group:`, result);
+    
+  } catch (error) {
+    console.error('❌ Error joining SignalR group:', error);
+  }
+};
 
   const handleSignalRMessage = (message) => {
     console.log('Processing SignalR message:', message);
