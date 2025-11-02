@@ -27,11 +27,11 @@ module.exports = async function (context, req) {
         context.log('📦 Message data received:', JSON.stringify(messageData, null, 2));
         
         // Validate required fields
-        if (!messageData.conversationId && !messageData.conversation_id) {
-            throw new Error('Missing conversationId in request');
+        if (!messageData.conversationId && !messageData.conversation_id && !messageData.chatSessionId) {
+            throw new Error('Missing conversationId or chatSessionId in request');
         }
         
-        const conversationId = messageData.conversationId || messageData.conversation_id;
+        const conversationId = messageData.chatSessionId || messageData.conversationId || messageData.conversation_id;
         const messageId = messageData.messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         // Parse payload if it's a string

@@ -406,8 +406,12 @@ const UnifiedChatWithHandoff = () => {
       const data = await response.json();
       console.log('ServiceNow response:', data);
       
-      const chatSessionId = data.body?.uiData?.chatSessionId || data.chatSessionId;
-      
+      //const chatSessionId = data.body?.uiData?.chatSessionId || data.chatSessionId;
+      const chatSessionId = data.body?.find(
+        item => item.actionType === 'SubscribeToChatPresence'
+      )?.chatSessionId || data.chatSessionId;
+      console.log('🔑 Extracted Chat Session ID:', chatSessionId);
+
       setServiceNowState(prev => ({
         ...prev,
         nowBotId: data.nowBotId || prev.nowBotId,
