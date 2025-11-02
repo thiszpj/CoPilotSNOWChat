@@ -2,8 +2,9 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch'); // npm install node-fetch@2
+const https = require('https'); // Native Node.js HTTPS module
 require('dotenv').config(); // npm install dotenv
-
+console.log('DEBUG: process.env.DIRECTLINE_SECRET =', process.env.DIRECTLINE_SECRET);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -192,69 +193,91 @@ app.get('/api/directline/conversations/:conversationId/activities', async (req, 
   }
 });
 
-// ServiceNow Bot Integration Proxy - FIXED VERSION
-app.post('/api/servicenow/bot/integration', async (req, res) => {
-    console.log('📄 ServiceNow Bot Integration proxy called');
+// ServiceNow Bot Integration Proxy - Using native HTTPS
+app.post('/api/servicenow/bot/integration', (req, res) => {
+    const requestId = Date.now();
+    console.log(`📄 [${requestId}] ServiceNow Bot Integration proxy called`);
     
     try {
         const { serviceNowUrl, username, password, token, payload } = req.body;
-        console.log('🔍 Password received (first 10 chars):', password.substring(0, 5));
-        console.log('🔍 Password length:', password.length);
+        console.log(`🔍 [${requestId}] Password received (first 10 chars):`, password?.substring(0, 5));
+        console.log(`🔍 [${requestId}] Password length:`, password?.length);
+        
         // Validate required parameters
         if (!serviceNowUrl || !username || !password || !token || !payload) {
             console.error('❌ Missing required parameters');
             return res.status(400).json({ 
                 error: 'Missing required parameters: serviceNowUrl, username, password, token, payload' 
             });
-            
         }
         
         // Create Basic Auth header
         const authString = Buffer.from(`${username}:${password}`).toString('base64');
+        console.log(`🔐 [${requestId}] Basic Auth string:`, authString);
+        console.log(`📤 [${requestId}] Sending request to ServiceNow`);
+        console.log(`🔑 [${requestId}] Using token:`, token.substring(0, 10) + '...');
+        console.log(`📋 [${requestId}] Payload:`, JSON.stringify(payload, null, 2));
         
-        console.log('📤 Sending request to ServiceNow:', serviceNowUrl);
-        console.log('🔑 Using token:', token.substring(0, 10) + '...');
-        console.log('📋 Payload:', JSON.stringify(payload, null, 2));
+        const postData = JSON.stringify(payload);
         
-        // FIXED: Use token from request body (not hardcoded)
-        // Token header must come first (as per Postman working example)
-        const headers = {
-            'Token': token,
-            'Content-Type': 'application/json',
-            'Authorization': `Basic ${authString}`,
-            'Accept': 'application/json'
+        const options = {
+            hostname: 'dev205527.service-now.com',
+            path: '/api/sn_va_as_service/bot/integration',
+            method: 'POST',
+            headers: {
+                'Token': token,
+                'Authorization': `Basic ${authString}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            }
         };
         
-        console.log('🔤 Request headers:', {
+        console.log(`🔤 [${requestId}] Request headers:`, {
             'Token': token.substring(0, 20) + '...',
-            'Content-Type': headers['Content-Type'],
-            'Authorization': 'Basic [HIDDEN]'
+            'Authorization': 'Basic [HIDDEN]',
+            'Content-Type': 'application/json'
         });
+        console.log(`📤 [${requestId}] Using native HTTPS module`);
         
-        const response = await fetch(`${serviceNowUrl}/api/sn_va_as_service/bot/integration`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(payload)
-        });
-        
-        console.log('📥 ServiceNow response status:', response.status);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('❌ ServiceNow API error:', response.status, errorText);
-            return res.status(response.status).json({ 
-                error: `ServiceNow API error: ${response.status}`,
-                details: errorText 
+        const serviceNowReq = https.request(options, (serviceNowRes) => {
+            let data = '';
+            
+            serviceNowRes.on('data', (chunk) => {
+                data += chunk;
             });
-        }
+            
+            serviceNowRes.on('end', () => {
+                console.log(`📥 [${requestId}] ServiceNow response status:`, serviceNowRes.statusCode);
+                
+                if (serviceNowRes.statusCode !== 200) {
+                    console.error(`❌ [${requestId}] ServiceNow API error:`, serviceNowRes.statusCode, data);
+                    return res.status(serviceNowRes.statusCode).json({
+                        error: `ServiceNow API error: ${serviceNowRes.statusCode}`,
+                        details: data
+                    });
+                }
+                
+                try {
+                    const jsonData = JSON.parse(data);
+                    console.log(`✅ [${requestId}] ServiceNow response received:`, JSON.stringify(jsonData, null, 2));
+                    res.json(jsonData);
+                } catch (e) {
+                    console.error(`❌ [${requestId}] Failed to parse response:`, e.message);
+                    res.status(500).json({ error: 'Failed to parse response' });
+                }
+            });
+        });
         
-        const data = await response.json();
-        console.log('✅ ServiceNow response received:', JSON.stringify(data, null, 2));
+        serviceNowReq.on('error', (error) => {
+            console.error(`❌ [${requestId}] Request error:`, error.message);
+            res.status(500).json({ error: error.message });
+        });
         
-        res.json(data);
+        serviceNowReq.write(postData);
+        serviceNowReq.end();
         
     } catch (error) {
-        console.error('❌ ServiceNow proxy error:', error.message);
+        console.error(`❌ [${requestId}] ServiceNow proxy error:`, error.message);
         console.error('Stack trace:', error.stack);
         res.status(500).json({ 
             error: 'Internal server error', 

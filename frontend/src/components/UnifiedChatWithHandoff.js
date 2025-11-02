@@ -364,8 +364,8 @@ const UnifiedChatWithHandoff = () => {
       const payload = {
         requestId: requestId,
         enterpriseId: "ServiceNow",
-        nowBotId: serviceNowState.nowBotId || "",
-        nowSessionId: serviceNowState.nowSessionId || "",
+        nowBotId: serviceNowState.nowBotId ||  null,
+        nowSessionId: serviceNowState.nowSessionId || null,
         topic: config.serviceNow.topicId,
         clientVariables: {},
         message: {
@@ -378,7 +378,7 @@ const UnifiedChatWithHandoff = () => {
         botToBot: true,
         silentMessage: null,
         intent: null,
-        contextVariables: sessionMappingRef.current.conversationContext,
+        contextVariables: {},
         userId: config.serviceNow.username,
         emailId: `${config.serviceNow.username}@example.com`
       };

@@ -18,13 +18,13 @@ const config = {
   
   // ✅ Option 2: Force Azure backend (ACTIVE - for testing Azure deployment)
   getBackendUrl: function() {
-    return this.AZURE_BACKEND_URL;
+   return this.AZURE_BACKEND_URL;
   },
   
   // Option 3: Force local backend (always use localhost:3001)
-  // getBackendUrl: function() {
-  //   return this.LOCAL_BACKEND_URL;
-  // },
+//    getBackendUrl: function() {
+//      return this.LOCAL_BACKEND_URL;
+//    },
   
   // ServiceNow Configuration
   serviceNow: {
