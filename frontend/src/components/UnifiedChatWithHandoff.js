@@ -500,7 +500,8 @@ const UnifiedChatWithHandoff = () => {
         requestId: serviceNowState.requestId,
         enterpriseId: "ServiceNow",
         nowBotId: serviceNowState.nowBotId,
-        nowSessionId: serviceNowState.nowSessionId,
+        //nowSessionId: serviceNowState.nowSessionId,
+        nowSessionId: serviceNowState.chatSessionId || serviceNowState.nowSessionId,
         topic: config.serviceNow.topicId,
         message: {
           text: messageText,
