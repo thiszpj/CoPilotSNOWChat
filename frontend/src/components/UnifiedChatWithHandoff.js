@@ -182,8 +182,14 @@ const UnifiedChatWithHandoff = () => {
     console.log(`📡 Attempting to join SignalR group: ${groupName}`);
     console.log(`🔌 Connection ID: ${connectionId}`);
     
-    // Call Azure Function to add connection to group
-    const response = await fetch(`${config.getBackendUrl()}/api/joingroup`, {
+    // Use Static Web App URL for Azure Functions (not backend API)
+    const azureFunctionUrl = config.IS_PRODUCTION 
+      ? `${config.AZURE_BASE_URL}/api/joingroup`
+      : 'http://localhost:7071/api/joingroup';  // For local testing with func host
+    
+    console.log(`📍 Calling: ${azureFunctionUrl}`);
+    
+    const response = await fetch(azureFunctionUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
