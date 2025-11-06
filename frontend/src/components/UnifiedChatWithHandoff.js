@@ -77,7 +77,7 @@ const UnifiedChatWithHandoff = () => {
       // context.user.displayName
       // context.app.theme (dark/light/contrast)
       
-      addSystemNotification(`Welcome ${context.user.displayName || 'to Support Chat'}! 👋`, 'info');
+      // Don't add notification here - let welcome screen show
       
     } catch (error) {
       console.log('ℹ️ Not running in Teams - Using standalone mode');
