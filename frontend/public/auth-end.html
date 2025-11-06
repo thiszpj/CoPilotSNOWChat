@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Complete</title>
+    <meta charset="UTF-8">
+    <script src="https://res.cdn.office.net/teams-js/2.0.0/js/MicrosoftTeams.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        .success {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: #10b981;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+        }
+        .checkmark {
+            color: white;
+            font-size: 30px;
+            font-weight: bold;
+        }
+        h3 {
+            color: #333;
+            margin: 0 0 10px 0;
+        }
+        p {
+            color: #666;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success">
+            <div class="checkmark">✓</div>
+        </div>
+        <h3>Authentication successful!</h3>
+        <p>You can close this window</p>
+    </div>
+    
+    <script>
+        microsoftTeams.app.initialize().then(() => {
+            const hashParams = new URLSearchParams(window.location.hash.substr(1));
+            const token = hashParams.get('id_token') || hashParams.get('access_token');
+            
+            if (token) {
+                microsoftTeams.authentication.notifySuccess(token);
+            } else {
+                microsoftTeams.authentication.notifyFailure('Token not found');
+            }
+        }).catch(error => {
+            console.error('Error:', error);
+            document.querySelector('p').textContent = 'An error occurred';
+        });
+    </script>
+</body>
+</html>

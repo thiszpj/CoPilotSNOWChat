@@ -1,11 +1,11 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
   "manifestVersion": "1.16",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "id": "57ad0c0b-469b-41ea-dca0-be67b0f5cae4",
   "packageName": "com.copilotsnow.supportchat",
   "developer": {
-    "name": "Your Company Name",
+    "name": "Prasenjit",
     "websiteUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
     "privacyUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
     "termsOfUseUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net"
@@ -15,7 +15,7 @@
     "outline": "outline.png"
   },
   "name": {
-    "short": "Copilot Support",
+    "short": "Copilot SNOW Support",
     "full": "Copilot with ServiceNow Live Agent Support"
   },
   "description": {
@@ -23,6 +23,12 @@
     "full": "Get instant help from our AI Copilot or escalate to a live ServiceNow agent for complex issues. Seamless transition from AI to human support."
   },
   "accentColor": "#6264A7",
+  
+  "webApplicationInfo": {
+    "id": "0c20e37b-3dfe-4e01-aed1-e7af544b3e7a",
+    "resource": "api://wonderful-sky-0661cc20f.3.azurestaticapps.net/0c20e37b-3dfe-4e01-aed1-e7af544b3e7a"
+  },
+  
   "staticTabs": [
     {
       "entityId": "copilotchat",
@@ -40,6 +46,8 @@
   "validDomains": [
     "wonderful-sky-0661cc20f.3.azurestaticapps.net",
     "copilotsnow-backend-api-exb4e5dtf3gkgjb2.eastus-01.azurewebsites.net",
-    "signalr-copilotsnowchat.service.signalr.net"
+    "signalr-copilotsnowchat.service.signalr.net",
+    "token.botframework.com",
+    "login.microsoftonline.com"
   ]
 }

@@ -25,6 +25,7 @@ const UnifiedChatWithHandoff = () => {
     requestId: null,
     chatSessionId: null
   });
+
   
   // Teams context with userId extracted from email
   const [userInfo, setUserInfo] = useState(null);
