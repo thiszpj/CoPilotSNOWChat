@@ -5,6 +5,9 @@ const fetch = require('node-fetch'); // npm install node-fetch@2
 const https = require('https'); // Native Node.js HTTPS module
 require('dotenv').config(); // npm install dotenv
 console.log('DEBUG: process.env.DIRECTLINE_SECRET =', process.env.DIRECTLINE_SECRET);
+console.log('DEBUG: process.env.DIRECTLINE_SECRET =', process.env.SERVICENOW_USERNAME);
+console.log('DEBUG: process.env.DIRECTLINE_SECRET =', process.env.SERVICENOW_PASSWORD);
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -17,6 +20,9 @@ const conversations = new Map();
 
 // Your Direct Line secret - store this in environment variables
 const DIRECTLINE_SECRET = process.env.DIRECTLINE_SECRET || 'YOUR_DIRECTLINE_SECRET_HERE';
+const SERVICENOW_USERNAME = process.env.SERVICENOW_USERNAME;
+const SERVICENOW_PASSWORD = process.env.SERVICENOW_PASSWORD;
+
 
 console.log('🚀 Starting Direct Line proxy server...');
 console.log(`📡 Port: ${PORT}`);
@@ -199,15 +205,29 @@ app.post('/api/servicenow/bot/integration', (req, res) => {
     console.log(`📄 [${requestId}] ServiceNow Bot Integration proxy called`);
     
     try {
-        const { serviceNowUrl, username, password, token, payload } = req.body;
-        console.log(`🔍 [${requestId}] Password received (first 10 chars):`, password?.substring(0, 5));
-        console.log(`🔍 [${requestId}] Password length:`, password?.length);
+        // ✅ CHANGED: Get credentials from environment, not request body
+        const username = SERVICENOW_USERNAME;
+        const password = SERVICENOW_PASSWORD;
+        
+        // Validate credentials are configured
+        if (!username || !password) {
+            console.error('❌ ServiceNow credentials not configured in environment');
+            return res.status(500).json({ 
+                error: 'ServiceNow credentials not configured on server' 
+            });
+        }
+        
+        // ✅ CHANGED: Get other params from request (removed username, password)
+        const { serviceNowUrl, token, payload } = req.body;
+        
+        console.log(`🔍 [${requestId}] Using credentials from environment`);
+        console.log(`🔍 [${requestId}] Username:`, username);
         
         // Validate required parameters
-        if (!serviceNowUrl || !username || !password || !token || !payload) {
+        if (!serviceNowUrl || !token || !payload) {
             console.error('❌ Missing required parameters');
             return res.status(400).json({ 
-                error: 'Missing required parameters: serviceNowUrl, username, password, token, payload' 
+                error: 'Missing required parameters: serviceNowUrl, token, payload' 
             });
         }
         
@@ -291,13 +311,26 @@ app.post('/api/servicenow/get-messages', async (req, res) => {
     console.log('🔍 ServiceNow Get Messages proxy called');
     
     try {
-        const { serviceNowUrl, username, password, conversationId, limit } = req.body;
+        // ✅ CHANGED: Get credentials from environment
+        const username = SERVICENOW_USERNAME;
+        const password = SERVICENOW_PASSWORD;
+        
+        // Validate credentials are configured
+        if (!username || !password) {
+            console.error('❌ ServiceNow credentials not configured in environment');
+            return res.status(500).json({ 
+                error: 'ServiceNow credentials not configured on server' 
+            });
+        }
+        
+        // ✅ CHANGED: Get other params from request (removed username, password)
+        const { serviceNowUrl, conversationId, limit } = req.body;
         
         // Validate required parameters
-        if (!serviceNowUrl || !username || !password || !conversationId) {
+        if (!serviceNowUrl || !conversationId) {
             console.error('❌ Missing required parameters');
             return res.status(400).json({ 
-                error: 'Missing required parameters: serviceNowUrl, username, password, conversationId' 
+                error: 'Missing required parameters: serviceNowUrl, conversationId' 
             });
         }
         
@@ -361,7 +394,7 @@ app.post('/api/servicenow/get-messages', async (req, res) => {
             message: error.message 
         });
     }
-});
+})
 
 // Clean up old conversations (run periodically)
 setInterval(() => {
