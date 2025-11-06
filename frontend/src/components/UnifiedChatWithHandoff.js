@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Loader2, UserCheck, AlertCircle, CheckCircle, Wifi, WifiOff } from 'lucide-react';
 import * as signalR from '@microsoft/signalr';
+import * as microsoftTeams from '@microsoft/teams-js';  // ← ADDED
 import config from '../config';
 
 const UnifiedChatWithHandoff = () => {
-  // Chat state
+  // ============== STATE MANAGEMENT ==============
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
-  // Mode: 'none', 'copilot', 'handoff', 'agent'
+  // Chat mode: 'none' | 'copilot' | 'handoff' | 'agent'
   const [chatMode, setChatMode] = useState('none');
   const chatModeRef = useRef('none');
   
-  // Copilot (Direct Line) state
+  // Copilot state
   const [copilotConversationId, setCopilotConversationId] = useState('');
   const [copilotWatermark, setCopilotWatermark] = useState('');
   const copilotPollIntervalRef = useRef(null);
@@ -26,285 +26,135 @@ const UnifiedChatWithHandoff = () => {
     chatSessionId: null
   });
   
-  // SignalR state
-  const [signalRConnection, setSignalRConnection] = useState(null);
+  // ServiceNow password (temporary - will be replaced with SSO)
+  const [serviceNowPassword, setServiceNowPassword] = useState('');
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
+  
+  // Teams state ← ADDED
+  const [teamsContext, setTeamsContext] = useState(null);
+  const [isInTeams, setIsInTeams] = useState(false);
+  
+  // SignalR
   const [signalRStatus, setSignalRStatus] = useState('disconnected');
   const signalRConnectionRef = useRef(null);
   
-  // Session mapping
+  // Session management
+  const [sessionId] = useState(() => {
+    return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  });
+  
   const sessionMappingRef = useRef({
     copilotConversationId: null,
     serviceNowChatSessionId: null,
     conversationContext: []
   });
   
-  // Configuration
-  const [serviceNowConfig, setServiceNowConfig] = useState({
-    password: '',
-  });
-  
-  const [showConfig, setShowConfig] = useState(true);
-  const messagesEndRef = useRef(null);
   const seenMessageIdsRef = useRef(new Set());
+  const messagesEndRef = useRef(null);
 
-  // Auto-scroll
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
+  // ============== TEAMS SDK INITIALIZATION ============== ← ADDED
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      scrollToBottom();
-    }, 100);
-    return () => clearTimeout(timeoutId);
-  }, [messages]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (copilotPollIntervalRef.current) {
-        clearInterval(copilotPollIntervalRef.current);
-      }
-      if (signalRConnectionRef.current) {
-        signalRConnectionRef.current.stop();
-      }
-    };
+    initializeTeamsSDK();
   }, []);
 
-  // ============== SIGNALR FUNCTIONS ==============
-  
-  const initializeSignalR = async () => {
+  const initializeTeamsSDK = async () => {
     try {
-      console.log('🔌 Initializing SignalR connection...');
-      setSignalRStatus('connecting');
+      // Try to initialize Teams SDK
+      await microsoftTeams.app.initialize();
       
-      // Get SignalR negotiation info from Azure Function
-      const negotiateResponse = await fetch(`${config.AZURE_API_URL}${config.endpoints.negotiate}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!negotiateResponse.ok) {
-        throw new Error('Failed to negotiate SignalR connection');
-      }
-
-      const negotiateData = await negotiateResponse.json();
-      console.log('✅ SignalR negotiation successful');
-
-      // Create SignalR connection
-      const connection = new signalR.HubConnectionBuilder()
-        .withUrl(negotiateData.url, {
-          accessTokenFactory: () => negotiateData.accessToken
-        })
-        .withAutomaticReconnect({
-          nextRetryDelayInMilliseconds: (retryContext) => {
-            if (retryContext.previousRetryCount === 0) return 0;
-            if (retryContext.previousRetryCount === 1) return 2000;
-            if (retryContext.previousRetryCount === 2) return 10000;
-            return 30000;
-          }
-        })
-        .configureLogging(signalR.LogLevel.Information)
-        .build();
-
-      // Set up event handlers
-      connection.on('newMessage', (message) => {
-        console.log('📨 SignalR message received:', message);
-        handleSignalRMessage(message);
-      });
-
-      connection.onreconnecting((error) => {
-        console.warn('⚠️ SignalR reconnecting...', error);
-        setSignalRStatus('connecting');
-      });
-
-      connection.onreconnected((connectionId) => {
-        console.log('✅ SignalR reconnected:', connectionId);
-        setSignalRStatus('connected');
-        // Rejoin group if needed
-        if (serviceNowState.chatSessionId) {
-          joinSignalRGroup(serviceNowState.chatSessionId);
-        }
-      });
-
-      connection.onclose((error) => {
-        console.error('❌ SignalR connection closed:', error);
-        setSignalRStatus('disconnected');
-      });
-
-      // Start connection
-      await connection.start();
-      console.log('✅ SignalR connected successfully');
+      console.log('✅ Teams SDK initialized - Running in Microsoft Teams');
+      setIsInTeams(true);
       
-      setSignalRConnection(connection);
-      signalRConnectionRef.current = connection;
-      setSignalRStatus('connected');
-
-      return connection;
+      // Get Teams context
+      const context = await microsoftTeams.app.getContext();
+      console.log('📱 Teams Context:', context);
+      
+      setTeamsContext(context);
+      
+      // You can use context for user info:
+      // context.user.id
+      // context.user.userPrincipalName
+      // context.user.displayName
+      // context.app.theme (dark/light/contrast)
+      
+      addSystemNotification(`Welcome ${context.user.displayName || 'to Support Chat'}! 👋`, 'info');
+      
     } catch (error) {
-      console.error('❌ SignalR initialization failed:', error);
-      setSignalRStatus('error');
-      throw error;
+      console.log('ℹ️ Not running in Teams - Using standalone mode');
+      setIsInTeams(false);
     }
   };
 
-  // const joinSignalRGroup = async (chatSessionId) => {
-  //   if (!signalRConnectionRef.current) {
-  //     console.warn('⚠️ SignalR not connected, cannot join group');
-  //     return;
-  //   }
+  // ============== SCROLL TO BOTTOM ==============
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
-  //   try {
-  //     const groupName = `conversation_${chatSessionId}`;
-  //     console.log(`📡 Joining SignalR group: ${groupName}`);
-      
-  //     // Azure SignalR Service uses server-side group management
-  //     // The group join happens automatically when messages are sent to that group
-  //     // But we log it for debugging
-  //     console.log(`✅ Ready to receive messages for group: ${groupName}`);
-      
-  //   } catch (error) {
-  //     console.error('❌ Error joining SignalR group:', error);
-  //   }
-  // };
-  const joinSignalRGroup = async (chatSessionId) => {
-  if (!signalRConnectionRef.current) {
-    console.warn('⚠️ SignalR not connected, cannot join group');
-    return;
-  }
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
-  try {
-    const groupName = `conversation_${chatSessionId}`;
-    const connectionId = signalRConnectionRef.current.connectionId;
-    
-    console.log(`📡 Attempting to join SignalR group: ${groupName}`);
-    console.log(`🔌 Connection ID: ${connectionId}`);
-    
-    // Use Static Web App URL for Azure Functions (not backend API)
-    const azureFunctionUrl = config.IS_PRODUCTION 
-      ? `${config.AZURE_BASE_URL}/api/joingroup`
-      : 'http://localhost:7071/api/joingroup';  // For local testing with func host
-    
-    console.log(`📍 Calling: ${azureFunctionUrl}`);
-    
-    const response = await fetch(azureFunctionUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        connectionId: connectionId,
-        groupName: groupName
-      })
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to join group: ${errorText}`);
-    }
-    
-    const result = await response.json();
-    console.log(`✅ Successfully joined SignalR group:`, result);
-    
-  } catch (error) {
-    console.error('❌ Error joining SignalR group:', error);
-  }
-};
+  // ============== INITIALIZATION ==============
+  useEffect(() => {
+    console.log('🆔 Session ID:', sessionId);
+    console.log('📱 Running in Teams:', isInTeams);
+  }, [sessionId, isInTeams]);
 
-  const handleSignalRMessage = (message) => {
-    console.log('Processing SignalR message:', message);
-    
-    // Check if already seen
-    if (seenMessageIdsRef.current.has(message.messageId)) {
-      console.log('Duplicate message, ignoring');
-      return;
-    }
-    
-    seenMessageIdsRef.current.add(message.messageId);
-    
-    const newMessage = {
-      id: message.messageId,
-      text: message.messageText || message.message,
-      sender: 'agent',
-      timestamp: new Date(message.receivedAt || message.timestamp),
-      metadata: {
-        createdBy: message.createdBy,
-        senderProfile: message.senderProfile,
-        eventType: message.eventType
-      }
+  // ============== SYSTEM NOTIFICATIONS ==============
+  const addSystemNotification = (text, type = 'info') => {
+    const notification = {
+      id: `system-${Date.now()}`,
+      text: text,
+      sender: 'system',
+      type: type, // 'info', 'success', 'warning', 'error'
+      timestamp: new Date()
     };
-    
-    setMessages(prev => [...prev, newMessage]);
-    
-    // Check for chat end event
-    if (message.eventType === 'ChatEnded') {
-      handleChatEnded();
-    }
+    setMessages(prev => [...prev, notification]);
   };
 
   // ============== COPILOT FUNCTIONS ==============
-  
   const initializeCopilot = async () => {
-    setIsLoading(true);
+    if (chatMode !== 'none') return;
+    
     try {
-      console.log('🤖 Initializing Copilot...');
-      
-      // Generate Direct Line token
+      setIsLoading(true);
+      addSystemNotification('Connecting to Copilot...', 'info');
+
+      // Generate token
       const tokenResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineTokenGenerate}`, {
         method: 'POST',
-        headers: {
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!tokenResponse.ok) throw new Error('Failed to generate token');
+      const { token } = await tokenResponse.json();
+
+      // Start conversation
+      const convResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineConversations}`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
 
-      if (!tokenResponse.ok) {
-        throw new Error('Failed to generate Direct Line token');
-      }
+      if (!convResponse.ok) throw new Error('Failed to create conversation');
+      const convData = await convResponse.json();
 
-      const tokenData = await tokenResponse.json();
-      
-      // Start conversation
-      const conversationResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineConversations}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          token: tokenData.token
-        })
-      });
+      setCopilotConversationId(convData.conversationId);
+      sessionMappingRef.current.copilotConversationId = convData.conversationId;
 
-      if (!conversationResponse.ok) {
-        throw new Error('Failed to start conversation');
-      }
-
-      const conversationData = await conversationResponse.json();
-      
-      setCopilotConversationId(conversationData.conversationId);
-      sessionMappingRef.current.copilotConversationId = conversationData.conversationId;
-      
       setChatMode('copilot');
       chatModeRef.current = 'copilot';
       
+      addSystemNotification('✅ Connected to Copilot. How can I help you today?', 'success');
+
       // Start polling
-      startCopilotPolling(conversationData.conversationId);
-      
-      setMessages([{
-        id: Date.now(),
-        text: 'Connected to Copilot! How can I help you today?',
-        sender: 'bot',
-        timestamp: new Date()
-      }]);
-      
-      console.log('✅ Copilot initialized');
+      startCopilotPolling(convData.conversationId);
+
     } catch (error) {
       console.error('❌ Copilot initialization failed:', error);
-      setMessages([{
-        id: Date.now(),
-        text: `Failed to connect to Copilot: ${error.message}`,
-        sender: 'system',
-        timestamp: new Date()
-      }]);
+      addSystemNotification(`Failed to connect: ${error.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -348,10 +198,9 @@ const UnifiedChatWithHandoff = () => {
           const existingIds = new Set(prev.map(m => m.id));
           const filteredNew = newMessages.filter(m => !existingIds.has(m.id));
           
-          // Check for handoff trigger in new messages
-          filteredNew.forEach(msg => {
-            checkForHandoffTrigger(msg.text);
-          });
+          if (filteredNew.length > 0) {
+            checkForHandoffTrigger(filteredNew[filteredNew.length - 1].text);
+          }
           
           return [...prev, ...filteredNew];
         });
@@ -381,12 +230,19 @@ const UnifiedChatWithHandoff = () => {
   };
 
   // ============== SERVICENOW FUNCTIONS ==============
-  
   const initiateServiceNowHandoff = async () => {
     try {
       console.log('🔄 Initiating ServiceNow handoff...');
       setChatMode('handoff');
       chatModeRef.current = 'handoff';
+      addSystemNotification('Connecting you to a live agent...', 'info');
+      
+      // Check if password is set
+      if (!serviceNowPassword) {
+        setShowPasswordInput(true);
+        addSystemNotification('⚠️ Please enter ServiceNow password to connect to an agent', 'warning');
+        return;
+      }
       
       // Initialize SignalR if not already connected
       if (!signalRConnectionRef.current || signalRStatus !== 'connected') {
@@ -402,15 +258,20 @@ const UnifiedChatWithHandoff = () => {
       const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
+      // Use Teams context if available ← MODIFIED
+      const userId = teamsContext?.user.id || sessionId;
+      const userEmail = teamsContext?.user.userPrincipalName || `${sessionId}@example.com`;
+      const userName = teamsContext?.user.displayName || 'Guest User';
+      
       const payload = {
         requestId: requestId,
         enterpriseId: "ServiceNow",
-        nowBotId: serviceNowState.nowBotId ||  null,
+        nowBotId: serviceNowState.nowBotId || null,
         nowSessionId: serviceNowState.nowSessionId || null,
         topic: config.serviceNow.topicId,
         clientVariables: {},
         message: {
-          text: "Copilot Handoff Test",
+          text: "User requesting live agent assistance",
           typed: false,
           clientMessageId: clientMessageId,
           attachment: null
@@ -420,9 +281,12 @@ const UnifiedChatWithHandoff = () => {
         silentMessage: null,
         intent: null,
         contextVariables: {},
-        userId: config.serviceNow.username,
-        emailId: `${config.serviceNow.username}@example.com`
+        userId: userId,        // ← Uses Teams ID if available
+        emailId: userEmail,    // ← Uses Teams email if available
+        userName: userName     // ← Uses Teams name if available
       };
+      
+      console.log('📤 Handoff payload:', payload);
       
       const response = await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
@@ -432,7 +296,7 @@ const UnifiedChatWithHandoff = () => {
         body: JSON.stringify({
           serviceNowUrl: config.serviceNow.baseUrl,
           username: config.serviceNow.username,
-          password: serviceNowConfig.password,
+          password: serviceNowPassword,
           token: config.serviceNow.token,
           payload: payload
         })
@@ -445,48 +309,39 @@ const UnifiedChatWithHandoff = () => {
       }
 
       const data = await response.json();
-      console.log('ServiceNow response:', data);
-      
-      //const chatSessionId = data.body?.uiData?.chatSessionId || data.chatSessionId;
+      console.log('✅ ServiceNow response:', data);
+
+      // Extract chatSessionId
       const chatSessionId = data.body?.find(
         item => item.actionType === 'SubscribeToChatPresence'
       )?.chatSessionId || data.chatSessionId;
-      console.log('🔑 Extracted Chat Session ID:', chatSessionId);
 
-      setServiceNowState(prev => ({
-        ...prev,
-        nowBotId: data.nowBotId || prev.nowBotId,
-        nowSessionId: data.nowSessionId || prev.nowSessionId,
+      if (!chatSessionId) {
+        throw new Error('Failed to extract chatSessionId from ServiceNow response');
+      }
+
+      console.log('🔑 Chat Session ID:', chatSessionId);
+
+      setServiceNowState({
+        nowBotId: data.nowBotId || null,
+        nowSessionId: data.nowSessionId || null,
         requestId: requestId,
         chatSessionId: chatSessionId
-      }));
-      
+      });
+
       sessionMappingRef.current.serviceNowChatSessionId = chatSessionId;
-      
-      // Join SignalR group for this conversation
-      if (chatSessionId) {
-        await joinSignalRGroup(chatSessionId);
-      }
-      
+
+      // Join SignalR group
+      await joinSignalRGroup(chatSessionId);
+
       setChatMode('agent');
       chatModeRef.current = 'agent';
       
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: data.body?.text || 'Connected to live agent. An agent will be with you shortly.',
-        sender: 'system',
-        timestamp: new Date()
-      }]);
-      
-      console.log('✅ Handoff successful');
+      addSystemNotification('✅ Connected to live agent. An agent will be with you shortly.', 'success');
+
     } catch (error) {
       console.error('❌ ServiceNow handoff failed:', error);
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: `Handoff failed: ${error.message}`,
-        sender: 'system',
-        timestamp: new Date()
-      }]);
+      addSystemNotification(`Failed to connect to agent: ${error.message}`, 'error');
       setChatMode('copilot');
       chatModeRef.current = 'copilot';
     }
@@ -496,11 +351,13 @@ const UnifiedChatWithHandoff = () => {
     try {
       const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
+      // Use Teams context if available ← MODIFIED
+      const userId = teamsContext?.user.id || sessionId;
+      
       const payload = {
         requestId: serviceNowState.requestId,
         enterpriseId: "ServiceNow",
         nowBotId: serviceNowState.nowBotId,
-        //nowSessionId: serviceNowState.nowSessionId,
         nowSessionId: serviceNowState.chatSessionId || serviceNowState.nowSessionId,
         topic: config.serviceNow.topicId,
         message: {
@@ -510,8 +367,10 @@ const UnifiedChatWithHandoff = () => {
           attachment: null
         },
         timestamp: Math.floor(Date.now() / 1000),
-        userId: config.serviceNow.username
+        userId: userId  // ← Uses Teams ID if available
       };
+      
+      console.log('📤 Sending message to ServiceNow:', payload);
       
       await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
@@ -521,33 +380,141 @@ const UnifiedChatWithHandoff = () => {
         body: JSON.stringify({
           serviceNowUrl: config.serviceNow.baseUrl,
           username: config.serviceNow.username,
-          password: serviceNowConfig.password,
+          password: serviceNowPassword,
           token: config.serviceNow.token,
           payload: payload
         })
       });
+      
+      console.log('✅ Message sent to ServiceNow successfully');
+      
     } catch (error) {
-      console.error('Error sending to ServiceNow:', error);
+      console.error('❌ Error sending to ServiceNow:', error);
       throw error;
     }
   };
 
-  // ============== HELPER FUNCTIONS ==============
-  
-  const checkForHandoffTrigger = (messageText) => {
-    const handoffKeywords = ['agent', 'human', 'speak to someone', 'escalate', 'representative'];
-    const lowerText = messageText.toLowerCase();
-    
-    if (handoffKeywords.some(keyword => lowerText.includes(keyword)) && chatModeRef.current === 'copilot') {
-      console.log('🔔 Handoff trigger detected');
-      chatModeRef.current = 'handoff'; 
-      setTimeout(() => {
-        initiateServiceNowHandoff();
-      }, 1000);
+  // ============== SIGNALR FUNCTIONS ==============
+  const initializeSignalR = async () => {
+    try {
+      console.log('🔌 Initializing SignalR...');
+      
+      const negotiateUrl = config.IS_PRODUCTION 
+        ? `${config.AZURE_BASE_URL}${config.endpoints.negotiate}`
+        : 'http://localhost:7071/api/negotiate';
+
+      const negotiateResponse = await fetch(negotiateUrl, { method: 'POST' });
+      
+      if (!negotiateResponse.ok) {
+        throw new Error('SignalR negotiation failed');
+      }
+
+      const negotiateData = await negotiateResponse.json();
+
+      const connection = new signalR.HubConnectionBuilder()
+        .withUrl(negotiateData.url, {
+          accessTokenFactory: () => negotiateData.accessToken
+        })
+        .withAutomaticReconnect()
+        .configureLogging(signalR.LogLevel.Information)
+        .build();
+
+      connection.on('newMessage', (message) => {
+        handleSignalRMessage(message);
+      });
+
+      connection.onreconnecting(() => {
+        console.log('🔄 SignalR reconnecting...');
+        setSignalRStatus('reconnecting');
+      });
+
+      connection.onreconnected(() => {
+        console.log('✅ SignalR reconnected');
+        setSignalRStatus('connected');
+        addSystemNotification('Reconnected to live chat', 'success');
+      });
+
+      connection.onclose(() => {
+        console.log('❌ SignalR connection closed');
+        setSignalRStatus('disconnected');
+      });
+
+      await connection.start();
+      console.log('✅ SignalR connected');
+      setSignalRStatus('connected');
+
+      signalRConnectionRef.current = connection;
+
+    } catch (error) {
+      console.error('❌ SignalR initialization failed:', error);
+      setSignalRStatus('error');
+      addSystemNotification('Failed to establish real-time connection', 'error');
+      throw error;
     }
   };
 
-  const handleChatEnded = () => {
+  const joinSignalRGroup = async (chatSessionId) => {
+    if (!signalRConnectionRef.current) {
+      console.warn('⚠️ SignalR not connected, cannot join group');
+      return;
+    }
+
+    try {
+      const groupName = `conversation_${chatSessionId}`;
+      const connectionId = signalRConnectionRef.current.connectionId;
+      
+      console.log(`📡 Joining SignalR group: ${groupName}`);
+      
+      const azureFunctionUrl = config.IS_PRODUCTION 
+        ? `${config.AZURE_BASE_URL}/api/joingroup`
+        : 'http://localhost:7071/api/joingroup';
+      
+      const response = await fetch(azureFunctionUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connectionId: connectionId,
+          groupName: groupName
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to join group: ${errorText}`);
+      }
+      
+      const result = await response.json();
+      console.log(`✅ Successfully joined SignalR group:`, result);
+      
+    } catch (error) {
+      console.error('❌ Error joining SignalR group:', error);
+    }
+  };
+
+  const handleSignalRMessage = (message) => {
+    console.log('📨 SignalR message received:', message);
+
+    const messageId = message.messageId || message.id || `signalr-${Date.now()}`;
+
+    if (seenMessageIdsRef.current.has(messageId)) {
+      console.log('⏭️ Duplicate message, skipping:', messageId);
+      return;
+    }
+
+    seenMessageIdsRef.current.add(messageId);
+
+    const newMessage = {
+      id: messageId,
+      text: message.messageText || message.message || message.text || '',
+      sender: 'agent',
+      agentName: message.created_by || 'Agent',
+      timestamp: message.created_on ? new Date(message.created_on) : new Date()
+    };
+
+    setMessages(prev => [...prev, newMessage]);
+  };
+
+  const handleAgentEndChat = () => {
     console.log('💬 Chat ended by agent');
     setChatMode('none');
     chatModeRef.current = 'none';
@@ -556,16 +523,10 @@ const UnifiedChatWithHandoff = () => {
       signalRConnectionRef.current.stop();
     }
     
-    setMessages(prev => [...prev, {
-      id: Date.now(),
-      text: 'The agent has ended the conversation. You can start a new chat if needed.',
-      sender: 'system',
-      timestamp: new Date()
-    }]);
+    addSystemNotification('The agent has ended the conversation. You can start a new chat if needed.', 'info');
   };
 
   // ============== MESSAGE SENDING ==============
-  
   const sendMessage = async () => {
     if (!inputMessage.trim()) return;
 
@@ -589,18 +550,13 @@ const UnifiedChatWithHandoff = () => {
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: `Error: ${error.message}`,
-        sender: 'system',
-        timestamp: new Date()
-      }]);
+      addSystemNotification(`Error: ${error.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -608,7 +564,6 @@ const UnifiedChatWithHandoff = () => {
   };
 
   const startNewChat = () => {
-    // Cleanup
     if (copilotPollIntervalRef.current) {
       clearInterval(copilotPollIntervalRef.current);
     }
@@ -616,7 +571,6 @@ const UnifiedChatWithHandoff = () => {
       signalRConnectionRef.current.stop();
     }
     
-    // Reset state
     setMessages([]);
     setChatMode('none');
     chatModeRef.current = 'none';
@@ -636,218 +590,248 @@ const UnifiedChatWithHandoff = () => {
     };
     seenMessageIdsRef.current.clear();
     
-    // Start new
     initializeCopilot();
   };
 
-  // ============== RENDER ==============
-  
-  const getModeDisplay = () => {
-    switch (chatMode) {
-      case 'copilot': return { text: 'Copilot', color: 'text-purple-600', bg: 'bg-purple-100' };
-      case 'handoff': return { text: 'Handoff in Progress', color: 'text-yellow-600', bg: 'bg-yellow-100' };
-      case 'agent': return { text: 'Live Agent', color: 'text-green-600', bg: 'bg-green-100' };
-      default: return { text: 'Not Started', color: 'text-gray-600', bg: 'bg-gray-100' };
+  // ============== HELPER FUNCTIONS ==============
+  const checkForHandoffTrigger = (messageText) => {
+    const handoffKeywords = ['agent', 'human', 'speak to someone', 'escalate', 'representative', 'live chat'];
+    const lowerText = messageText.toLowerCase();
+    
+    if (handoffKeywords.some(keyword => lowerText.includes(keyword)) && chatModeRef.current === 'copilot') {
+      console.log('🔔 Handoff trigger detected');
+      chatModeRef.current = 'handoff';
+      setTimeout(() => {
+        initiateServiceNowHandoff();
+      }, 1000);
     }
   };
 
-  const mode = getModeDisplay();
+  const formatTime = (date) => {
+    return new Date(date).toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  };
 
+  // ============== RENDER ==============
   return (
-    <div className="max-w-7xl mx-auto p-6 bg-white rounded-lg shadow-lg">
-      {/* Header */}
-      <div className="mb-6 pb-4 border-b">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-800">Unified Chat with Intelligent Handoff</h1>
-          <div className="flex items-center gap-4">
-            {/* Mode Badge */}
-            <div className={`px-3 py-1 rounded-full ${mode.bg} ${mode.color} text-sm font-semibold`}>
-              {mode.text}
-            </div>
-            
-            {/* SignalR Status */}
-            {signalRStatus === 'connected' && (
-              <div className="flex items-center gap-2 text-green-600 text-sm">
-                <Wifi className="w-4 h-4" />
-                <span>Real-time Connected</span>
-              </div>
-            )}
-            {signalRStatus === 'connecting' && (
-              <div className="flex items-center gap-2 text-yellow-600 text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Connecting...</span>
-              </div>
-            )}
-            {signalRStatus === 'error' && (
-              <div className="flex items-center gap-2 text-red-600 text-sm">
-                <WifiOff className="w-4 h-4" />
-                <span>Connection Error</span>
-              </div>
-            )}
+    <div className="flex flex-col h-screen bg-white">
+      {/* Header - Teams Style */}
+      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">Support Chat</h1>
+            <p className="text-xs text-gray-500">
+              {chatMode === 'copilot' && 'AI Assistant'}
+              {chatMode === 'agent' && 'Live Agent'}
+              {chatMode === 'handoff' && 'Connecting...'}
+              {chatMode === 'none' && (isInTeams ? '📱 Teams' : 'Ready to help')}
+            </p>
           </div>
         </div>
         
-        {/* Environment Info */}
-        <div className="mt-2 text-sm text-gray-500">
-          Environment: {config.IS_PRODUCTION ? '🌐 Production (Azure)' : '💻 Local Development'}
+        <div className="flex items-center space-x-2">
+          {/* Password Input - Small, discreet */}
+          {showPasswordInput && (
+            <div className="flex items-center space-x-1 mr-2">
+              <input
+                type="password"
+                value={serviceNowPassword}
+                onChange={(e) => setServiceNowPassword(e.target.value)}
+                placeholder="Password"
+                className="text-xs px-2 py-1 border border-gray-300 rounded w-24 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => {
+                  setShowPasswordInput(false);
+                  if (chatMode === 'handoff') {
+                    initiateServiceNowHandoff();
+                  }
+                }}
+                className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                OK
+              </button>
+            </div>
+          )}
+          
+          {chatMode !== 'none' && (
+            <button
+              onClick={startNewChat}
+              className="px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded flex items-center space-x-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>New Chat</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Configuration Panel */}
-      {showConfig && chatMode === 'none' && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-blue-800">ServiceNow Configuration</h3>
-            <button
-              onClick={() => setShowConfig(false)}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              Hide
-            </button>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ServiceNow Password:
-              </label>
-              <input
-                type="password"
-                value={serviceNowConfig.password}
-                onChange={(e) => setServiceNowConfig({...serviceNowConfig, password: e.target.value})}
-                placeholder="Enter ServiceNow password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+      {/* Messages Area - Teams Style */}
+      <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4">
+        <div className="max-w-4xl mx-auto space-y-4">
+          {messages.length === 0 && chatMode === 'none' && (
+            <div className="text-center py-16">
+              <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+                Welcome to Support Chat
+                {isInTeams && ' 📱'}
+              </h2>
+              <p className="text-gray-600 mb-2">Get instant help from our AI assistant or connect with a live agent</p>
+              {teamsContext && (
+                <p className="text-sm text-gray-500 mb-6">
+                  Signed in as: {teamsContext.user.displayName}
+                </p>
+              )}
+              <button
+                onClick={initializeCopilot}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm"
+              >
+                Start Chat
+              </button>
             </div>
-            <div className="text-xs text-gray-600">
-              <p><strong>Base URL:</strong> {config.serviceNow.baseUrl}</p>
-              <p><strong>Username:</strong> {config.serviceNow.username}</p>
-              <p><strong>Topic ID:</strong> {config.serviceNow.topicId}</p>
-            </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Chat Container */}
-      <div className="border border-gray-200 rounded-lg overflow-hidden">
-        {/* Messages */}
-        <div className="h-96 overflow-y-auto bg-gray-50 p-4">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
-              <Bot className="w-16 h-16 mb-4 text-gray-400" />
-              <p className="text-lg font-semibold mb-2">Ready to start a conversation</p>
-              <p className="text-sm">Click "Start Chat" below to begin with Copilot</p>
-              <p className="text-xs mt-2">Handoff to live agent will happen automatically if needed</p>
-            </div>
-          ) : (
-            <>
-              {messages.map((message) => (
-                <div key={message.id} className={`mb-4 flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex items-start gap-2 max-w-md ${message.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                      message.sender === 'user' 
-                        ? 'bg-blue-500 text-white'
-                        : message.sender === 'bot'
-                        ? 'bg-purple-500 text-white'
-                        : message.sender === 'agent'
-                        ? 'bg-green-500 text-white'
-                        : 'bg-gray-500 text-white'
-                    }`}>
-                      {message.sender === 'user' ? <User className="w-4 h-4" /> : 
-                       message.sender === 'agent' ? <UserCheck className="w-4 h-4" /> : 
-                       <Bot className="w-4 h-4" />}
+          {messages.map((message) => {
+            if (message.sender === 'system') {
+              return (
+                <div key={message.id} className="flex justify-center my-4">
+                  <div className={`
+                    max-w-md px-4 py-2 rounded-full text-xs font-medium
+                    ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : ''}
+                    ${message.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : ''}
+                    ${message.type === 'warning' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : ''}
+                    ${message.type === 'info' ? 'bg-blue-50 text-blue-700 border border-blue-200' : ''}
+                  `}>
+                    {message.text}
+                  </div>
+                </div>
+              );
+            }
+
+            if (message.sender === 'user') {
+              return (
+                <div key={message.id} className="flex justify-end">
+                  <div className="flex flex-col items-end max-w-xl">
+                    <div className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm">
+                      <p className="text-sm whitespace-pre-wrap">{message.text}</p>
                     </div>
-                    
-                    <div className={`px-4 py-2 rounded-lg ${
-                      message.sender === 'user'
-                        ? 'bg-blue-500 text-white'
-                        : message.sender === 'bot'
-                        ? 'bg-white text-gray-800 border border-purple-200'
-                        : message.sender === 'agent'
-                        ? 'bg-white text-gray-800 border border-green-200'
-                        : 'bg-gray-200 text-gray-700'
-                    }`}>
-                      <div className="text-sm">{message.text}</div>
-                      <div className={`text-xs mt-1 ${
-                        message.sender === 'user' ? 'text-blue-100' : 'text-gray-500'
+                    <span className="text-xs text-gray-500 mt-1">{formatTime(message.timestamp)}</span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (message.sender === 'bot' || message.sender === 'agent') {
+              return (
+                <div key={message.id} className="flex justify-start">
+                  <div className="flex space-x-2 max-w-xl">
+                    <div className="flex-shrink-0">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                        message.sender === 'bot' 
+                          ? 'bg-gradient-to-br from-purple-500 to-blue-500' 
+                          : 'bg-gradient-to-br from-green-500 to-teal-500'
                       }`}>
-                        {message.timestamp.toLocaleTimeString()}
-                        {message.sender === 'agent' && message.metadata?.createdBy && (
-                          <span className="ml-2">• {message.metadata.createdBy}</span>
+                        {message.sender === 'bot' ? (
+                          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
                         )}
                       </div>
                     </div>
+                    <div className="flex flex-col">
+                      <div className="bg-white px-4 py-2 rounded-lg shadow-sm border border-gray-200">
+                        {message.sender === 'agent' && message.agentName && (
+                          <p className="text-xs font-semibold text-gray-700 mb-1">{message.agentName}</p>
+                        )}
+                        <p className="text-sm text-gray-900 whitespace-pre-wrap">{message.text}</p>
+                      </div>
+                      <span className="text-xs text-gray-500 mt-1 ml-1">{formatTime(message.timestamp)}</span>
+                    </div>
                   </div>
                 </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div>
+              );
+            }
 
-        {/* Input Area */}
-        <div className="p-4 bg-white border-t border-gray-200">
-          {chatMode === 'none' ? (
-            <button
-              onClick={startNewChat}
-              disabled={!serviceNowConfig.password}
-              className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-            >
-              Start Chat with Copilot
-            </button>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
-                  disabled={isLoading || chatMode === 'handoff'}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={isLoading || !inputMessage.trim() || chatMode === 'handoff'}
-                  className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Send className="w-5 h-5" />
-                  )}
-                </button>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <div className="text-xs text-gray-500">
-                  {chatMode === 'handoff' && 'Transferring to live agent...'}
-                  {chatMode === 'agent' && 'Connected to live agent via real-time SignalR'}
+            return null;
+          })}
+
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="flex space-x-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
                 </div>
-                <button
-                  onClick={startNewChat}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  Start New Chat
-                </button>
+                <div className="bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-200">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
+
+          <div ref={messagesEndRef} />
         </div>
       </div>
 
-      {/* Info Panel */}
-      <div className="mt-4 p-4 bg-gray-50 rounded-lg text-sm text-gray-600">
-        <h4 className="font-semibold text-gray-800 mb-2">How it works:</h4>
-        <ol className="list-decimal list-inside space-y-1 text-xs">
-          <li>Chat starts with Microsoft Copilot using Direct Line</li>
-          <li>Copilot answers questions and provides assistance</li>
-          <li>If handoff keywords detected (e.g., "speak to agent"), automatic escalation occurs</li>
-          <li>Chat is transferred to ServiceNow live agent</li>
-          <li>Real-time messaging via Azure SignalR Service</li>
-          <li>All messages stored in Azure Table Storage</li>
-        </ol>
-      </div>
+      {/* Input Area - Teams Style */}
+      {chatMode !== 'none' && (
+        <div className="bg-white border-t border-gray-200 px-4 py-3">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-end space-x-2">
+              <div className="flex-1 relative">
+                <textarea
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type a message..."
+                  rows={1}
+                  className="w-full px-4 py-2.5 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  style={{ minHeight: '42px', maxHeight: '120px' }}
+                />
+                <button
+                  onClick={sendMessage}
+                  disabled={!inputMessage.trim() || isLoading}
+                  className="absolute right-2 bottom-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            
+            {/* Subtle hint */}
+            {chatMode === 'copilot' && (
+              <p className="text-xs text-gray-500 mt-2 text-center">
+                Type "agent" or "I need a human" to connect with a live support agent
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
