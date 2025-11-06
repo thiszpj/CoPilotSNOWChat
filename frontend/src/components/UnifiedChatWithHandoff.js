@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as signalR from '@microsoft/signalr';
-import * as microsoftTeams from '@microsoft/teams-js';  // ← ADDED
+import * as microsoftTeams from '@microsoft/teams-js';
 import config from '../config';
 
 const UnifiedChatWithHandoff = () => {
@@ -26,12 +26,8 @@ const UnifiedChatWithHandoff = () => {
     chatSessionId: null
   });
   
-  // ServiceNow password (temporary - will be replaced with SSO)
-  const [serviceNowPassword, setServiceNowPassword] = useState('');
-  const [showPasswordInput, setShowPasswordInput] = useState(false);
-  
-  // Teams state ← ADDED
-  const [teamsContext, setTeamsContext] = useState(null);
+  // Teams context with userId extracted from email
+  const [userInfo, setUserInfo] = useState(null);
   const [isInTeams, setIsInTeams] = useState(false);
   
   // SignalR
@@ -52,37 +48,52 @@ const UnifiedChatWithHandoff = () => {
   const seenMessageIdsRef = useRef(new Set());
   const messagesEndRef = useRef(null);
 
-  // ============== TEAMS SDK INITIALIZATION ============== ← ADDED
+  // ============== HELPER: Extract userId from email ==============
+  const extractUserIdFromEmail = (email) => {
+    if (!email) return null;
+    // firstname.lastname@domain.com → firstname.lastname
+    return email.split('@')[0];
+  };
+
+  // ============== TEAMS SDK INITIALIZATION ==============
   useEffect(() => {
-    initializeTeamsSDK();
+    initializeApp();
   }, []);
 
-  const initializeTeamsSDK = async () => {
+  const initializeApp = async () => {
     try {
       // Try to initialize Teams SDK
       await microsoftTeams.app.initialize();
       
-      console.log('✅ Teams SDK initialized - Running in Microsoft Teams');
+      console.log('✅ Teams SDK initialized');
       setIsInTeams(true);
       
       // Get Teams context
       const context = await microsoftTeams.app.getContext();
       console.log('📱 Teams Context:', context);
       
-      setTeamsContext(context);
+      const email = context.user?.userPrincipalName;
+      const userId = extractUserIdFromEmail(email);
       
-      // You can use context for user info:
-      // context.user.id
-      // context.user.userPrincipalName
-      // context.user.displayName
-      // context.app.theme (dark/light/contrast)
+      const userInfo = {
+        id: context.user?.id,
+        name: context.user?.displayName,
+        email: email,
+        userId: userId  // firstname.lastname
+      };
       
-      // Don't add notification here - let welcome screen show
+      setUserInfo(userInfo);
+      console.log('👤 User Info:', userInfo);
       
     } catch (error) {
-      console.log('ℹ️ Not running in Teams - Using standalone mode');
+      console.log('ℹ️ Not in Teams - Using standalone mode');
       setIsInTeams(false);
     }
+    
+    // Auto-start Copilot chat
+    setTimeout(() => {
+      initializeCopilot();
+    }, 500);
   };
 
   // ============== SCROLL TO BOTTOM ==============
@@ -94,31 +105,12 @@ const UnifiedChatWithHandoff = () => {
     scrollToBottom();
   }, [messages]);
 
-  // ============== INITIALIZATION ==============
-  useEffect(() => {
-    console.log('🆔 Session ID:', sessionId);
-    console.log('📱 Running in Teams:', isInTeams);
-  }, [sessionId, isInTeams]);
-
-  // ============== SYSTEM NOTIFICATIONS ==============
-  const addSystemNotification = (text, type = 'info') => {
-    const notification = {
-      id: `system-${Date.now()}`,
-      text: text,
-      sender: 'system',
-      type: type, // 'info', 'success', 'warning', 'error'
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, notification]);
-  };
-
   // ============== COPILOT FUNCTIONS ==============
   const initializeCopilot = async () => {
     if (chatMode !== 'none') return;
     
     try {
       setIsLoading(true);
-      addSystemNotification('Connecting to Copilot...', 'info');
 
       // Generate token
       const tokenResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineTokenGenerate}`, {
@@ -146,15 +138,12 @@ const UnifiedChatWithHandoff = () => {
 
       setChatMode('copilot');
       chatModeRef.current = 'copilot';
-      
-      addSystemNotification('✅ Connected to Copilot. How can I help you today?', 'success');
 
       // Start polling
       startCopilotPolling(convData.conversationId);
 
     } catch (error) {
       console.error('❌ Copilot initialization failed:', error);
-      addSystemNotification(`Failed to connect: ${error.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -235,14 +224,6 @@ const UnifiedChatWithHandoff = () => {
       console.log('🔄 Initiating ServiceNow handoff...');
       setChatMode('handoff');
       chatModeRef.current = 'handoff';
-      addSystemNotification('Connecting you to a live agent...', 'info');
-      
-      // Check if password is set
-      if (!serviceNowPassword) {
-        setShowPasswordInput(true);
-        addSystemNotification('⚠️ Please enter ServiceNow password to connect to an agent', 'warning');
-        return;
-      }
       
       // Initialize SignalR if not already connected
       if (!signalRConnectionRef.current || signalRStatus !== 'connected') {
@@ -254,20 +235,19 @@ const UnifiedChatWithHandoff = () => {
         clearInterval(copilotPollIntervalRef.current);
       }
       
-      // Call ServiceNow Bot Integration API
+      // Use Teams user info or fallback to sessionId
+      const userId = userInfo?.userId || sessionId;
+      const userEmail = userInfo?.email || `${sessionId}@example.com`;
+      const userName = userInfo?.name || 'Guest User';
+      
       const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Use Teams context if available ← MODIFIED
-      const userId = teamsContext?.user.id || sessionId;
-      const userEmail = teamsContext?.user.userPrincipalName || `${sessionId}@example.com`;
-      const userName = teamsContext?.user.displayName || 'Guest User';
       
       const payload = {
         requestId: requestId,
         enterpriseId: "ServiceNow",
-        nowBotId: serviceNowState.nowBotId || null,
-        nowSessionId: serviceNowState.nowSessionId || null,
+        nowBotId: null,
+        nowSessionId: null,
         topic: config.serviceNow.topicId,
         clientVariables: {},
         message: {
@@ -281,13 +261,14 @@ const UnifiedChatWithHandoff = () => {
         silentMessage: null,
         intent: null,
         contextVariables: {},
-        userId: userId,        // ← Uses Teams ID if available
-        emailId: userEmail,    // ← Uses Teams email if available
-        userName: userName     // ← Uses Teams name if available
+        userId: userId,        // firstname.lastname
+        emailId: userEmail,    // firstname.lastname@domain.com
+        userName: userName
       };
       
       console.log('📤 Handoff payload:', payload);
       
+      // ✅ UPDATED: Don't send username/password
       const response = await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
         headers: {
@@ -295,8 +276,8 @@ const UnifiedChatWithHandoff = () => {
         },
         body: JSON.stringify({
           serviceNowUrl: config.serviceNow.baseUrl,
-          username: config.serviceNow.username,
-          password: serviceNowPassword,
+          // username: removed - now on server
+          // password: removed - now on server
           token: config.serviceNow.token,
           payload: payload
         })
@@ -317,7 +298,7 @@ const UnifiedChatWithHandoff = () => {
       )?.chatSessionId || data.chatSessionId;
 
       if (!chatSessionId) {
-        throw new Error('Failed to extract chatSessionId from ServiceNow response');
+        throw new Error('Failed to extract chatSessionId');
       }
 
       console.log('🔑 Chat Session ID:', chatSessionId);
@@ -336,12 +317,9 @@ const UnifiedChatWithHandoff = () => {
 
       setChatMode('agent');
       chatModeRef.current = 'agent';
-      
-      addSystemNotification('✅ Connected to live agent. An agent will be with you shortly.', 'success');
 
     } catch (error) {
       console.error('❌ ServiceNow handoff failed:', error);
-      addSystemNotification(`Failed to connect to agent: ${error.message}`, 'error');
       setChatMode('copilot');
       chatModeRef.current = 'copilot';
     }
@@ -349,10 +327,8 @@ const UnifiedChatWithHandoff = () => {
 
   const sendToServiceNow = async (messageText) => {
     try {
+      const userId = userInfo?.userId || sessionId;
       const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Use Teams context if available ← MODIFIED
-      const userId = teamsContext?.user.id || sessionId;
       
       const payload = {
         requestId: serviceNowState.requestId,
@@ -367,11 +343,12 @@ const UnifiedChatWithHandoff = () => {
           attachment: null
         },
         timestamp: Math.floor(Date.now() / 1000),
-        userId: userId  // ← Uses Teams ID if available
+        userId: userId  // firstname.lastname
       };
       
       console.log('📤 Sending message to ServiceNow:', payload);
       
+      // ✅ UPDATED: Don't send username/password
       await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
         headers: {
@@ -379,14 +356,14 @@ const UnifiedChatWithHandoff = () => {
         },
         body: JSON.stringify({
           serviceNowUrl: config.serviceNow.baseUrl,
-          username: config.serviceNow.username,
-          password: serviceNowPassword,
+          // username: removed - now on server
+          // password: removed - now on server
           token: config.serviceNow.token,
           payload: payload
         })
       });
       
-      console.log('✅ Message sent to ServiceNow successfully');
+      console.log('✅ Message sent successfully');
       
     } catch (error) {
       console.error('❌ Error sending to ServiceNow:', error);
@@ -431,7 +408,6 @@ const UnifiedChatWithHandoff = () => {
       connection.onreconnected(() => {
         console.log('✅ SignalR reconnected');
         setSignalRStatus('connected');
-        addSystemNotification('Reconnected to live chat', 'success');
       });
 
       connection.onclose(() => {
@@ -448,7 +424,6 @@ const UnifiedChatWithHandoff = () => {
     } catch (error) {
       console.error('❌ SignalR initialization failed:', error);
       setSignalRStatus('error');
-      addSystemNotification('Failed to establish real-time connection', 'error');
       throw error;
     }
   };
@@ -479,12 +454,10 @@ const UnifiedChatWithHandoff = () => {
       });
       
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to join group: ${errorText}`);
+        throw new Error('Failed to join group');
       }
       
-      const result = await response.json();
-      console.log(`✅ Successfully joined SignalR group:`, result);
+      console.log(`✅ Successfully joined SignalR group`);
       
     } catch (error) {
       console.error('❌ Error joining SignalR group:', error);
@@ -497,7 +470,7 @@ const UnifiedChatWithHandoff = () => {
     const messageId = message.messageId || message.id || `signalr-${Date.now()}`;
 
     if (seenMessageIdsRef.current.has(messageId)) {
-      console.log('⏭️ Duplicate message, skipping:', messageId);
+      console.log('⏭️ Duplicate message, skipping');
       return;
     }
 
@@ -512,18 +485,6 @@ const UnifiedChatWithHandoff = () => {
     };
 
     setMessages(prev => [...prev, newMessage]);
-  };
-
-  const handleAgentEndChat = () => {
-    console.log('💬 Chat ended by agent');
-    setChatMode('none');
-    chatModeRef.current = 'none';
-    
-    if (signalRConnectionRef.current) {
-      signalRConnectionRef.current.stop();
-    }
-    
-    addSystemNotification('The agent has ended the conversation. You can start a new chat if needed.', 'info');
   };
 
   // ============== MESSAGE SENDING ==============
@@ -550,7 +511,6 @@ const UnifiedChatWithHandoff = () => {
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      addSystemNotification(`Error: ${error.message}`, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -561,36 +521,6 @@ const UnifiedChatWithHandoff = () => {
       e.preventDefault();
       sendMessage();
     }
-  };
-
-  const startNewChat = () => {
-    if (copilotPollIntervalRef.current) {
-      clearInterval(copilotPollIntervalRef.current);
-    }
-    if (signalRConnectionRef.current) {
-      signalRConnectionRef.current.stop();
-    }
-    
-    setMessages([]);
-    setChatMode('none');
-    chatModeRef.current = 'none';
-    setCopilotConversationId('');
-    setCopilotWatermark('');
-    setServiceNowState({
-      nowBotId: null,
-      nowSessionId: null,
-      requestId: null,
-      chatSessionId: null
-    });
-    setSignalRStatus('disconnected');
-    sessionMappingRef.current = {
-      copilotConversationId: null,
-      serviceNowChatSessionId: null,
-      conversationContext: []
-    };
-    seenMessageIdsRef.current.clear();
-    
-    initializeCopilot();
   };
 
   // ============== HELPER FUNCTIONS ==============
@@ -617,119 +547,19 @@ const UnifiedChatWithHandoff = () => {
 
   // ============== RENDER ==============
   return (
-    <div className="flex flex-col h-screen bg-white">
-      {/* Header - Teams Style */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Support Chat</h1>
-            <p className="text-xs text-gray-500">
-              {chatMode === 'copilot' && 'AI Assistant'}
-              {chatMode === 'agent' && 'Live Agent'}
-              {chatMode === 'handoff' && 'Connecting...'}
-              {chatMode === 'none' && (isInTeams ? '📱 Teams' : 'Ready to help')}
-            </p>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          {/* Password Input - Small, discreet */}
-          {showPasswordInput && (
-            <div className="flex items-center space-x-1 mr-2">
-              <input
-                type="password"
-                value={serviceNowPassword}
-                onChange={(e) => setServiceNowPassword(e.target.value)}
-                placeholder="Password"
-                className="text-xs px-2 py-1 border border-gray-300 rounded w-24 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <button
-                onClick={() => {
-                  setShowPasswordInput(false);
-                  if (chatMode === 'handoff') {
-                    initiateServiceNowHandoff();
-                  }
-                }}
-                className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-              >
-                OK
-              </button>
-            </div>
-          )}
-          
-          {chatMode !== 'none' && (
-            <button
-              onClick={startNewChat}
-              className="px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded flex items-center space-x-1"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span>New Chat</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Messages Area - Teams Style */}
-      <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4">
-        <div className="max-w-4xl mx-auto space-y-4">
-          {messages.length === 0 && chatMode === 'none' && (
-            <div className="text-center py-16">
-              <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                Welcome to Support Chat
-                {isInTeams && ' 📱'}
-              </h2>
-              <p className="text-gray-600 mb-2">Get instant help from our AI assistant or connect with a live agent</p>
-              {teamsContext && (
-                <p className="text-sm text-gray-500 mb-6">
-                  Signed in as: {teamsContext.user.displayName}
-                </p>
-              )}
-              <button
-                onClick={initializeCopilot}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm"
-              >
-                Start Chat
-              </button>
-            </div>
-          )}
-
+    <div className="flex flex-col h-screen bg-gray-50">
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="max-w-3xl mx-auto space-y-3">
           {messages.map((message) => {
-            if (message.sender === 'system') {
-              return (
-                <div key={message.id} className="flex justify-center my-4">
-                  <div className={`
-                    max-w-md px-4 py-2 rounded-full text-xs font-medium
-                    ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : ''}
-                    ${message.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : ''}
-                    ${message.type === 'warning' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : ''}
-                    ${message.type === 'info' ? 'bg-blue-50 text-blue-700 border border-blue-200' : ''}
-                  `}>
-                    {message.text}
-                  </div>
-                </div>
-              );
-            }
-
             if (message.sender === 'user') {
               return (
                 <div key={message.id} className="flex justify-end">
-                  <div className="flex flex-col items-end max-w-xl">
-                    <div className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm">
-                      <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                  <div className="flex flex-col items-end max-w-lg">
+                    <div className="bg-blue-600 text-white px-4 py-2.5 rounded-2xl rounded-tr-sm shadow-sm">
+                      <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
                     </div>
-                    <span className="text-xs text-gray-500 mt-1">{formatTime(message.timestamp)}</span>
+                    <span className="text-xs text-gray-500 mt-1 mr-1">{formatTime(message.timestamp)}</span>
                   </div>
                 </div>
               );
@@ -738,33 +568,14 @@ const UnifiedChatWithHandoff = () => {
             if (message.sender === 'bot' || message.sender === 'agent') {
               return (
                 <div key={message.id} className="flex justify-start">
-                  <div className="flex space-x-2 max-w-xl">
-                    <div className="flex-shrink-0">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        message.sender === 'bot' 
-                          ? 'bg-gradient-to-br from-purple-500 to-blue-500' 
-                          : 'bg-gradient-to-br from-green-500 to-teal-500'
-                      }`}>
-                        {message.sender === 'bot' ? (
-                          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                          </svg>
-                        ) : (
-                          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                          </svg>
-                        )}
-                      </div>
+                  <div className="flex flex-col max-w-lg">
+                    <div className="bg-white px-4 py-2.5 rounded-2xl rounded-tl-sm shadow-sm border border-gray-200">
+                      {message.sender === 'agent' && message.agentName && (
+                        <p className="text-xs font-semibold text-gray-600 mb-1">{message.agentName}</p>
+                      )}
+                      <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{message.text}</p>
                     </div>
-                    <div className="flex flex-col">
-                      <div className="bg-white px-4 py-2 rounded-lg shadow-sm border border-gray-200">
-                        {message.sender === 'agent' && message.agentName && (
-                          <p className="text-xs font-semibold text-gray-700 mb-1">{message.agentName}</p>
-                        )}
-                        <p className="text-sm text-gray-900 whitespace-pre-wrap">{message.text}</p>
-                      </div>
-                      <span className="text-xs text-gray-500 mt-1 ml-1">{formatTime(message.timestamp)}</span>
-                    </div>
+                    <span className="text-xs text-gray-500 mt-1 ml-1">{formatTime(message.timestamp)}</span>
                   </div>
                 </div>
               );
@@ -775,18 +586,11 @@ const UnifiedChatWithHandoff = () => {
 
           {isLoading && (
             <div className="flex justify-start">
-              <div className="flex space-x-2">
-                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <div className="bg-white px-4 py-3 rounded-lg shadow-sm border border-gray-200">
-                  <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                  </div>
+              <div className="bg-white px-4 py-3 rounded-2xl shadow-sm border border-gray-200">
+                <div className="flex space-x-1.5">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                 </div>
               </div>
             </div>
@@ -796,42 +600,33 @@ const UnifiedChatWithHandoff = () => {
         </div>
       </div>
 
-      {/* Input Area - Teams Style */}
-      {chatMode !== 'none' && (
-        <div className="bg-white border-t border-gray-200 px-4 py-3">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex items-end space-x-2">
-              <div className="flex-1 relative">
-                <textarea
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type a message..."
-                  rows={1}
-                  className="w-full px-4 py-2.5 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  style={{ minHeight: '42px', maxHeight: '120px' }}
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!inputMessage.trim() || isLoading}
-                  className="absolute right-2 bottom-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                </button>
-              </div>
+      {/* Input Area */}
+      <div className="bg-white border-t border-gray-200 px-4 py-3">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-end space-x-2">
+            <div className="flex-1 relative">
+              <textarea
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type a message..."
+                rows={1}
+                className="w-full px-4 py-2.5 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                style={{ minHeight: '44px', maxHeight: '120px' }}
+              />
+              <button
+                onClick={sendMessage}
+                disabled={!inputMessage.trim() || isLoading}
+                className="absolute right-2 bottom-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </button>
             </div>
-            
-            {/* Subtle hint */}
-            {chatMode === 'copilot' && (
-              <p className="text-xs text-gray-500 mt-2 text-center">
-                Type "agent" or "I need a human" to connect with a live support agent
-              </p>
-            )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };

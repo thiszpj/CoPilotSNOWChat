@@ -29,7 +29,8 @@ const config = {
   // ServiceNow Configuration
   serviceNow: {
     baseUrl: 'https://dev205527.service-now.com',
-    username: 'admin',
+    // ✅ REMOVED: username (now stored in backend environment variables)
+    // username: 'admin',
     token: 'TGbK5XRDgtmf4rK',
     topicId: 'ce2ee85053130010cf8cddeeff7b12bf'
   },
@@ -40,7 +41,8 @@ const config = {
     directLineConversations: '/api/directline/conversations',      // ✅ Capital 'L'
     serviceNowBotIntegration: '/api/servicenow/bot/integration',
     serviceNowGetMessages: '/api/servicenow/get-messages',
-    negotiate: '/negotiate'
+    negotiate: '/negotiate',
+    joinGroup: '/api/joingroup'  // ✅ Added missing endpoint
   }
 };
 
