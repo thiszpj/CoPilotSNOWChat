@@ -597,12 +597,12 @@ const UnifiedChatWithHandoff = () => {
           {messages.map((message) => {
             if (message.sender === 'user') {
               return (
-                <div key={message.id} className="flex justify-end">
+                <div key={message.id} className="flex justify-end mb-2">
                   <div className="flex flex-col items-end max-w-lg">
-                    <div style={{ backgroundColor: '#E4E6FA', color: '#242424' }} className="px-4 py-2.5 rounded-lg shadow-sm">
+                    <div style={{ backgroundColor: '#E4E6FA', color: '#242424' }} className="px-4 py-2 rounded-lg">
                       <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
                     </div>
-                    <span className="text-xs mt-1 mr-1" style={{ color: '#616161' }}>{formatTime(message.timestamp)}</span>
+                    <span className="text-xs mt-1" style={{ color: '#616161' }}>{formatTime(message.timestamp)}</span>
                   </div>
                 </div>
               );
@@ -610,15 +610,39 @@ const UnifiedChatWithHandoff = () => {
 
             if (message.sender === 'bot' || message.sender === 'agent') {
               return (
-                <div key={message.id} className="flex justify-start">
-                  <div className="flex flex-col max-w-lg">
-                    <div style={{ backgroundColor: '#F5F5F5', color: '#242424' }} className="px-4 py-2.5 rounded-lg shadow-sm">
-                      {message.sender === 'agent' && message.agentName && (
-                        <p className="text-xs font-semibold mb-1" style={{ color: '#616161' }}>{message.agentName}</p>
-                      )}
-                      <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
+                <div key={message.id} className="flex justify-start mb-2">
+                  <div className="flex items-start space-x-2 max-w-lg">
+                    {/* Avatar Icon */}
+                    <div className="flex-shrink-0 mt-1">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: message.sender === 'bot' ? '#5B5FC7' : '#107C10' }}>
+                        {message.sender === 'bot' ? (
+                          // Robot icon for Copilot
+                          <svg className="w-5 h-5" style={{ color: '#FFFFFF' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                        ) : (
+                          // Person icon for Agent
+                          <svg className="w-5 h-5" style={{ color: '#FFFFFF' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-xs mt-1 ml-1" style={{ color: '#616161' }}>{formatTime(message.timestamp)}</span>
+                    
+                    <div className="flex flex-col">
+                      {/* Name and timestamp on same line */}
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="text-xs font-semibold" style={{ color: '#242424' }}>
+                          {message.sender === 'agent' && message.agentName ? message.agentName : 'AI Assistant'}
+                        </span>
+                        <span className="text-xs" style={{ color: '#616161' }}>{formatTime(message.timestamp)}</span>
+                      </div>
+                      
+                      {/* Message bubble */}
+                      <div style={{ backgroundColor: '#F5F5F5', color: '#242424' }} className="px-4 py-2 rounded-lg">
+                        <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -628,12 +652,25 @@ const UnifiedChatWithHandoff = () => {
           })}
 
           {isLoading && (
-            <div className="flex justify-start">
-              <div className="px-4 py-3 rounded-lg shadow-sm" style={{ backgroundColor: '#F5F5F5' }}>
-                <div className="flex space-x-1.5">
-                  <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '300ms' }}></div>
+            <div className="flex justify-start mb-2">
+              <div className="flex items-start space-x-2">
+                {/* Robot icon */}
+                <div className="flex-shrink-0 mt-1">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: '#5B5FC7' }}>
+                    <svg className="w-5 h-5" style={{ color: '#FFFFFF' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                </div>
+                
+                <div className="flex flex-col">
+                  <div className="px-4 py-3 rounded-lg" style={{ backgroundColor: '#F5F5F5' }}>
+                    <div className="flex space-x-1.5">
+                      <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '0ms' }}></div>
+                      <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '150ms' }}></div>
+                      <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '300ms' }}></div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -652,27 +689,29 @@ const UnifiedChatWithHandoff = () => {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Type a message..."
+                placeholder="Type a message"
                 rows={1}
-                className="w-full px-4 py-2.5 pr-12 border rounded-lg focus:outline-none focus:ring-2 resize-none"
+                className="w-full px-3 py-2 pr-10 border rounded focus:outline-none resize-none"
                 style={{ 
-                  minHeight: '44px', 
+                  minHeight: '36px', 
                   maxHeight: '120px',
                   borderColor: '#E0E0E0',
-                  color: '#242424'
+                  color: '#242424',
+                  fontSize: '14px'
                 }}
               />
               <button
                 onClick={sendMessage}
                 disabled={!inputMessage.trim() || isLoading}
-                className="absolute right-2 bottom-2 p-2 rounded-lg transition-colors"
+                className="absolute right-2 bottom-2 p-1.5 rounded transition-colors"
                 style={{
-                  backgroundColor: inputMessage.trim() && !isLoading ? '#5B5FC7' : '#E0E0E0',
-                  color: '#FFFFFF'
+                  backgroundColor: 'transparent',
+                  color: inputMessage.trim() && !isLoading ? '#5B5FC7' : '#C4C4C4'
                 }}
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                {/* Right arrow like Teams */}
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
                 </svg>
               </button>
             </div>
