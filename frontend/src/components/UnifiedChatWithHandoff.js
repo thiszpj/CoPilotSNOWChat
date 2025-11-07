@@ -580,29 +580,29 @@ const UnifiedChatWithHandoff = () => {
   // ============== RENDER ==============
   if (isAuthenticating) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
+      <div className="flex items-center justify-center h-screen" style={{ backgroundColor: '#FFFFFF' }}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Authenticating...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4" style={{ borderColor: '#5B5FC7' }}></div>
+          <p style={{ color: '#616161' }}>Authenticating...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-screen" style={{ backgroundColor: '#FFFFFF' }}>
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4" style={{ backgroundColor: '#FFFFFF' }}>
         <div className="max-w-3xl mx-auto space-y-3">
           {messages.map((message) => {
             if (message.sender === 'user') {
               return (
                 <div key={message.id} className="flex justify-end">
                   <div className="flex flex-col items-end max-w-lg">
-                    <div className="bg-blue-600 text-white px-4 py-2.5 rounded-2xl rounded-tr-sm shadow-sm">
+                    <div style={{ backgroundColor: '#E4E6FA', color: '#242424' }} className="px-4 py-2.5 rounded-lg shadow-sm">
                       <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
                     </div>
-                    <span className="text-xs text-gray-500 mt-1 mr-1">{formatTime(message.timestamp)}</span>
+                    <span className="text-xs mt-1 mr-1" style={{ color: '#616161' }}>{formatTime(message.timestamp)}</span>
                   </div>
                 </div>
               );
@@ -612,13 +612,13 @@ const UnifiedChatWithHandoff = () => {
               return (
                 <div key={message.id} className="flex justify-start">
                   <div className="flex flex-col max-w-lg">
-                    <div className="bg-white px-4 py-2.5 rounded-2xl rounded-tl-sm shadow-sm border border-gray-200">
+                    <div style={{ backgroundColor: '#F5F5F5', color: '#242424' }} className="px-4 py-2.5 rounded-lg shadow-sm">
                       {message.sender === 'agent' && message.agentName && (
-                        <p className="text-xs font-semibold text-gray-600 mb-1">{message.agentName}</p>
+                        <p className="text-xs font-semibold mb-1" style={{ color: '#616161' }}>{message.agentName}</p>
                       )}
-                      <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{message.text}</p>
+                      <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
                     </div>
-                    <span className="text-xs text-gray-500 mt-1 ml-1">{formatTime(message.timestamp)}</span>
+                    <span className="text-xs mt-1 ml-1" style={{ color: '#616161' }}>{formatTime(message.timestamp)}</span>
                   </div>
                 </div>
               );
@@ -629,11 +629,11 @@ const UnifiedChatWithHandoff = () => {
 
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-white px-4 py-3 rounded-2xl shadow-sm border border-gray-200">
+              <div className="px-4 py-3 rounded-lg shadow-sm" style={{ backgroundColor: '#F5F5F5' }}>
                 <div className="flex space-x-1.5">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: '#616161', animationDelay: '300ms' }}></div>
                 </div>
               </div>
             </div>
@@ -644,7 +644,7 @@ const UnifiedChatWithHandoff = () => {
       </div>
 
       {/* Input Area */}
-      <div className="bg-white border-t border-gray-200 px-4 py-3">
+      <div className="border-t px-4 py-3" style={{ backgroundColor: '#FFFFFF', borderColor: '#E0E0E0' }}>
         <div className="max-w-3xl mx-auto">
           <div className="flex items-end space-x-2">
             <div className="flex-1 relative">
@@ -654,13 +654,22 @@ const UnifiedChatWithHandoff = () => {
                 onKeyDown={handleKeyDown}
                 placeholder="Type a message..."
                 rows={1}
-                className="w-full px-4 py-2.5 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                style={{ minHeight: '44px', maxHeight: '120px' }}
+                className="w-full px-4 py-2.5 pr-12 border rounded-lg focus:outline-none focus:ring-2 resize-none"
+                style={{ 
+                  minHeight: '44px', 
+                  maxHeight: '120px',
+                  borderColor: '#E0E0E0',
+                  color: '#242424'
+                }}
               />
               <button
                 onClick={sendMessage}
                 disabled={!inputMessage.trim() || isLoading}
-                className="absolute right-2 bottom-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                className="absolute right-2 bottom-2 p-2 rounded-lg transition-colors"
+                style={{
+                  backgroundColor: inputMessage.trim() && !isLoading ? '#5B5FC7' : '#E0E0E0',
+                  color: '#FFFFFF'
+                }}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
