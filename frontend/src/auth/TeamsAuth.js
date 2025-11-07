@@ -3,8 +3,7 @@ import * as microsoftTeams from '@microsoft/teams-js';
 
 export class TeamsAuth {
   /**
-   * Get authentication token from Teams
-   * Returns token with user information
+   * Get authentication token from Teams SSO
    */
   static async getAuthToken() {
     try {
@@ -12,7 +11,6 @@ export class TeamsAuth {
       
       console.log('🔐 Requesting SSO token from Teams...');
       
-      // Request SSO token from Teams
       const token = await microsoftTeams.authentication.getAuthToken({
         resources: [],
         silent: false
@@ -24,19 +22,14 @@ export class TeamsAuth {
     } catch (error) {
       console.error('❌ SSO failed:', error);
       
-      // If silent SSO fails, try interactive login
       if (error.message?.includes('CancelledByUser')) {
         throw new Error('User cancelled login');
       }
       
-      // Fallback to interactive login
       return await this.interactiveLogin();
     }
   }
   
-  /**
-   * Interactive login fallback
-   */
   static async interactiveLogin() {
     return new Promise((resolve, reject) => {
       microsoftTeams.authentication.authenticate({
@@ -55,12 +48,8 @@ export class TeamsAuth {
     });
   }
   
-  /**
-   * Decode JWT token to get user information
-   */
   static getUserInfoFromToken(token) {
     try {
-      // Decode JWT token (it's base64 encoded)
       const base64Url = token.split('.')[1];
       const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
       const jsonPayload = decodeURIComponent(
@@ -71,8 +60,6 @@ export class TeamsAuth {
       );
       
       const decoded = JSON.parse(jsonPayload);
-      
-      // Extract user info
       const email = decoded.preferred_username || decoded.upn || decoded.email;
       const userId = this.extractUserIdFromEmail(email);
       
@@ -80,7 +67,7 @@ export class TeamsAuth {
         id: decoded.oid || decoded.sub,
         name: decoded.name,
         email: email,
-        userId: userId,  // firstname.lastname (without domain)
+        userId: userId,
         tenantId: decoded.tid,
         token: token
       };
@@ -91,24 +78,13 @@ export class TeamsAuth {
     }
   }
   
-  /**
-   * Extract userId from email
-   * firstname.lastname@domain.com → firstname.lastname
-   */
   static extractUserIdFromEmail(email) {
     if (!email) return null;
-    
-    // Split by @ and take the first part
     const userId = email.split('@')[0];
-    
     console.log(`📧 Email: ${email} → UserId: ${userId}`);
-    
     return userId;
   }
   
-  /**
-   * Get Teams context (user info without SSO)
-   */
   static async getTeamsContext() {
     try {
       await microsoftTeams.app.initialize();
@@ -127,29 +103,6 @@ export class TeamsAuth {
       };
     } catch (error) {
       console.error('❌ Failed to get Teams context:', error);
-      return null;
-    }
-  }
-  
-  /**
-   * Call Microsoft Graph API (optional)
-   */
-  static async callGraphAPI(token) {
-    try {
-      const response = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Graph API call failed');
-      }
-      
-      return await response.json();
-      
-    } catch (error) {
-      console.error('❌ Graph API error:', error);
       return null;
     }
   }

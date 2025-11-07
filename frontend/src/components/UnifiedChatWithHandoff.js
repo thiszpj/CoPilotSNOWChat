@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as signalR from '@microsoft/signalr';
-import * as microsoftTeams from '@microsoft/teams-js';
+import { TeamsAuth } from '../auth/TeamsAuth';
 import config from '../config';
 
 const UnifiedChatWithHandoff = () => {
@@ -8,6 +8,7 @@ const UnifiedChatWithHandoff = () => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
   
   // Chat mode: 'none' | 'copilot' | 'handoff' | 'agent'
   const [chatMode, setChatMode] = useState('none');
@@ -25,9 +26,8 @@ const UnifiedChatWithHandoff = () => {
     requestId: null,
     chatSessionId: null
   });
-
   
-  // Teams context with userId extracted from email
+  // User info with SSO
   const [userInfo, setUserInfo] = useState(null);
   const [isInTeams, setIsInTeams] = useState(false);
   
@@ -49,52 +49,54 @@ const UnifiedChatWithHandoff = () => {
   const seenMessageIdsRef = useRef(new Set());
   const messagesEndRef = useRef(null);
 
-  // ============== HELPER: Extract userId from email ==============
-  const extractUserIdFromEmail = (email) => {
-    if (!email) return null;
-    // firstname.lastname@domain.com → firstname.lastname
-    return email.split('@')[0];
-  };
-
-  // ============== TEAMS SDK INITIALIZATION ==============
+  // ============== SSO INITIALIZATION ==============
   useEffect(() => {
-    initializeApp();
+    initializeWithSSO();
   }, []);
 
-  const initializeApp = async () => {
+  const initializeWithSSO = async () => {
     try {
-      // Try to initialize Teams SDK
-      await microsoftTeams.app.initialize();
+      setIsAuthenticating(true);
       
-      console.log('✅ Teams SDK initialized');
-      setIsInTeams(true);
+      // Get Teams context first
+      const context = await TeamsAuth.getTeamsContext();
       
-      // Get Teams context
-      const context = await microsoftTeams.app.getContext();
-      console.log('📱 Teams Context:', context);
-      
-      const email = context.user?.userPrincipalName;
-      const userId = extractUserIdFromEmail(email);
-      
-      const userInfo = {
-        id: context.user?.id,
-        name: context.user?.displayName,
-        email: email,
-        userId: userId  // firstname.lastname
-      };
-      
-      setUserInfo(userInfo);
-      console.log('👤 User Info:', userInfo);
+      if (context) {
+        console.log('✅ Running in Teams');
+        setIsInTeams(true);
+        
+        // Try SSO authentication
+        try {
+          const token = await TeamsAuth.getAuthToken();
+          const userInfo = TeamsAuth.getUserInfoFromToken(token);
+          
+          if (userInfo) {
+            console.log('✅ SSO successful:', userInfo);
+            setUserInfo(userInfo);
+          } else {
+            // Fallback to basic context
+            console.log('⚠️ Using basic Teams context');
+            setUserInfo(context);
+          }
+        } catch (ssoError) {
+          console.log('⚠️ SSO not available, using basic context');
+          setUserInfo(context);
+        }
+      } else {
+        console.log('ℹ️ Not running in Teams');
+        setIsInTeams(false);
+      }
       
     } catch (error) {
-      console.log('ℹ️ Not in Teams - Using standalone mode');
-      setIsInTeams(false);
+      console.error('❌ Authentication error:', error);
+    } finally {
+      setIsAuthenticating(false);
+      
+      // Auto-start chat after authentication
+      setTimeout(() => {
+        initializeCopilot();
+      }, 500);
     }
-    
-    // Auto-start Copilot chat
-    setTimeout(() => {
-      initializeCopilot();
-    }, 500);
   };
 
   // ============== SCROLL TO BOTTOM ==============
@@ -113,7 +115,6 @@ const UnifiedChatWithHandoff = () => {
     try {
       setIsLoading(true);
 
-      // Generate token
       const tokenResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineTokenGenerate}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -122,7 +123,6 @@ const UnifiedChatWithHandoff = () => {
       if (!tokenResponse.ok) throw new Error('Failed to generate token');
       const { token } = await tokenResponse.json();
 
-      // Start conversation
       const convResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineConversations}`, {
         method: 'POST',
         headers: { 
@@ -140,7 +140,6 @@ const UnifiedChatWithHandoff = () => {
       setChatMode('copilot');
       chatModeRef.current = 'copilot';
 
-      // Start polling
       startCopilotPolling(convData.conversationId);
 
     } catch (error) {
@@ -226,17 +225,14 @@ const UnifiedChatWithHandoff = () => {
       setChatMode('handoff');
       chatModeRef.current = 'handoff';
       
-      // Initialize SignalR if not already connected
       if (!signalRConnectionRef.current || signalRStatus !== 'connected') {
         await initializeSignalR();
       }
       
-      // Stop Copilot polling
       if (copilotPollIntervalRef.current) {
         clearInterval(copilotPollIntervalRef.current);
       }
       
-      // Use Teams user info or fallback to sessionId
       const userId = userInfo?.userId || sessionId;
       const userEmail = userInfo?.email || `${sessionId}@example.com`;
       const userName = userInfo?.name || 'Guest User';
@@ -262,14 +258,13 @@ const UnifiedChatWithHandoff = () => {
         silentMessage: null,
         intent: null,
         contextVariables: {},
-        userId: userId,        // firstname.lastname
-        emailId: userEmail,    // firstname.lastname@domain.com
+        userId: userId,
+        emailId: userEmail,
         userName: userName
       };
       
       console.log('📤 Handoff payload:', payload);
       
-      // ✅ UPDATED: Don't send username/password
       const response = await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
         headers: {
@@ -277,8 +272,6 @@ const UnifiedChatWithHandoff = () => {
         },
         body: JSON.stringify({
           serviceNowUrl: config.serviceNow.baseUrl,
-          // username: removed - now on server
-          // password: removed - now on server
           token: config.serviceNow.token,
           payload: payload
         })
@@ -293,7 +286,6 @@ const UnifiedChatWithHandoff = () => {
       const data = await response.json();
       console.log('✅ ServiceNow response:', data);
 
-      // Extract chatSessionId
       const chatSessionId = data.body?.find(
         item => item.actionType === 'SubscribeToChatPresence'
       )?.chatSessionId || data.chatSessionId;
@@ -313,7 +305,6 @@ const UnifiedChatWithHandoff = () => {
 
       sessionMappingRef.current.serviceNowChatSessionId = chatSessionId;
 
-      // Join SignalR group
       await joinSignalRGroup(chatSessionId);
 
       setChatMode('agent');
@@ -344,12 +335,11 @@ const UnifiedChatWithHandoff = () => {
           attachment: null
         },
         timestamp: Math.floor(Date.now() / 1000),
-        userId: userId  // firstname.lastname
+        userId: userId
       };
       
       console.log('📤 Sending message to ServiceNow:', payload);
       
-      // ✅ UPDATED: Don't send username/password
       await fetch(`${config.getBackendUrl()}${config.endpoints.serviceNowBotIntegration}`, {
         method: 'POST',
         headers: {
@@ -357,8 +347,6 @@ const UnifiedChatWithHandoff = () => {
         },
         body: JSON.stringify({
           serviceNowUrl: config.serviceNow.baseUrl,
-          // username: removed - now on server
-          // password: removed - now on server
           token: config.serviceNow.token,
           payload: payload
         })
@@ -524,7 +512,6 @@ const UnifiedChatWithHandoff = () => {
     }
   };
 
-  // ============== HELPER FUNCTIONS ==============
   const checkForHandoffTrigger = (messageText) => {
     const handoffKeywords = ['agent', 'human', 'speak to someone', 'escalate', 'representative', 'live chat'];
     const lowerText = messageText.toLowerCase();
@@ -547,6 +534,17 @@ const UnifiedChatWithHandoff = () => {
   };
 
   // ============== RENDER ==============
+  if (isAuthenticating) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Authenticating...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Messages Area */}

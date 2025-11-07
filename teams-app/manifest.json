@@ -1,11 +1,11 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
   "manifestVersion": "1.16",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "id": "57ad0c0b-469b-41ea-dca0-be67b0f5cae4",
   "packageName": "com.copilotsnow.supportchat",
   "developer": {
-    "name": "Prasenjit",
+    "name": "Your Company Name",
     "websiteUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
     "privacyUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net",
     "termsOfUseUrl": "https://wonderful-sky-0661cc20f.3.azurestaticapps.net"
@@ -15,7 +15,7 @@
     "outline": "outline.png"
   },
   "name": {
-    "short": "Copilot SNOW Support",
+    "short": "Copilot Support",
     "full": "Copilot with ServiceNow Live Agent Support"
   },
   "description": {
