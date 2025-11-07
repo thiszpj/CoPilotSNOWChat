@@ -30,6 +30,7 @@ const UnifiedChatWithHandoff = () => {
   // User info with SSO
   const [userInfo, setUserInfo] = useState(null);
   const [isInTeams, setIsInTeams] = useState(false);
+  const userInfoRef = useRef(null);  // Add ref to persist userInfo
   
   // SignalR
   const [signalRStatus, setSignalRStatus] = useState('disconnected');
@@ -73,18 +74,55 @@ const UnifiedChatWithHandoff = () => {
           if (userInfo) {
             console.log('✅ SSO successful:', userInfo);
             setUserInfo(userInfo);
+            userInfoRef.current = userInfo;  // Store in ref too
+            
+            // Add welcome message
+            const welcomeMessage = {
+              id: `welcome-${Date.now()}`,
+              text: `Hello ${userInfo.name || 'there'}! 👋 Welcome to Support Chat. I'm your AI assistant. How can I help you today?`,
+              sender: 'bot',
+              timestamp: new Date()
+            };
+            setMessages([welcomeMessage]);
           } else {
             // Fallback to basic context
             console.log('⚠️ Using basic Teams context');
             setUserInfo(context);
+            
+            // Add welcome message with basic context
+            const welcomeMessage = {
+              id: `welcome-${Date.now()}`,
+              text: `Hello ${context.name || 'there'}! 👋 Welcome to Support Chat. I'm your AI assistant. How can I help you today?`,
+              sender: 'bot',
+              timestamp: new Date()
+            };
+            setMessages([welcomeMessage]);
           }
         } catch (ssoError) {
           console.log('⚠️ SSO not available, using basic context');
           setUserInfo(context);
+          
+          // Add welcome message with basic context
+          const welcomeMessage = {
+            id: `welcome-${Date.now()}`,
+            text: `Hello ${context.name || 'there'}! 👋 Welcome to Support Chat. I'm your AI assistant. How can I help you today?`,
+            sender: 'bot',
+            timestamp: new Date()
+          };
+          setMessages([welcomeMessage]);
         }
       } else {
         console.log('ℹ️ Not running in Teams');
         setIsInTeams(false);
+        
+        // Add generic welcome for browser
+        const welcomeMessage = {
+          id: `welcome-${Date.now()}`,
+          text: `Hello! 👋 Welcome to Support Chat. I'm your AI assistant. How can I help you today?`,
+          sender: 'bot',
+          timestamp: new Date()
+        };
+        setMessages([welcomeMessage]);
       }
       
     } catch (error) {
@@ -222,6 +260,8 @@ const UnifiedChatWithHandoff = () => {
   const initiateServiceNowHandoff = async () => {
     try {
       console.log('🔄 Initiating ServiceNow handoff...');
+      console.log('👤 Current userInfo:', userInfo);
+      
       setChatMode('handoff');
       chatModeRef.current = 'handoff';
       
@@ -233,9 +273,13 @@ const UnifiedChatWithHandoff = () => {
         clearInterval(copilotPollIntervalRef.current);
       }
       
-      const userId = userInfo?.userId || sessionId;
-      const userEmail = userInfo?.email || `${sessionId}@example.com`;
-      const userName = userInfo?.name || 'Guest User';
+      // Use userInfo with proper fallback
+      const currentUserInfo = userInfoRef.current || userInfo;
+      const userId = currentUserInfo?.userId || sessionId;
+      const userEmail = currentUserInfo?.email || `${sessionId}@example.com`;
+      
+      console.log('📧 Using userId:', userId);
+      console.log('📧 Using email:', userEmail);
       
       const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -248,7 +292,7 @@ const UnifiedChatWithHandoff = () => {
         topic: config.serviceNow.topicId,
         clientVariables: {},
         message: {
-          text: "User requesting live agent assistance",
+          text: "Copilot Handoff Test",
           typed: false,
           clientMessageId: clientMessageId,
           attachment: null
@@ -259,8 +303,8 @@ const UnifiedChatWithHandoff = () => {
         intent: null,
         contextVariables: {},
         userId: userId,
-        emailId: userEmail,
-        userName: userName
+        emailId: userEmail
+        // Removed userName - not in your ideal payload
       };
       
       console.log('📤 Handoff payload:', payload);
