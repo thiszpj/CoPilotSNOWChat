@@ -126,9 +126,9 @@ const UnifiedChatWithHandoff = () => {
       const convResponse = await fetch(`${config.getBackendUrl()}${config.endpoints.directLineConversations}`, {
         method: 'POST',
         headers: { 
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({ token: token })
       });
 
       if (!convResponse.ok) throw new Error('Failed to create conversation');
