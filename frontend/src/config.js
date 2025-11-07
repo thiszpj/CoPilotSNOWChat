@@ -41,7 +41,7 @@ const config = {
     directLineConversations: '/api/directline/conversations',      // ✅ Capital 'L'
     serviceNowBotIntegration: '/api/servicenow/bot/integration',
     serviceNowGetMessages: '/api/servicenow/get-messages',
-    negotiate: '/negotiate',
+    negotiate: '/api/negotiate',
     joinGroup: '/api/joingroup'  // ✅ Added missing endpoint
   }
 };

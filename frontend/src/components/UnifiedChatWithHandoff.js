@@ -366,7 +366,7 @@ const UnifiedChatWithHandoff = () => {
       console.log('🔌 Initializing SignalR...');
       
       const negotiateUrl = config.IS_PRODUCTION 
-        ? `${config.AZURE_BASE_URL}${config.endpoints.negotiate}`
+        ? `${config.AZURE_BASE_URL}/api/negotiate`
         : 'http://localhost:7071/api/negotiate';
 
       const negotiateResponse = await fetch(negotiateUrl, { method: 'POST' });
